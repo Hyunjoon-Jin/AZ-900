@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AZ-900 학습 앱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="app-header">
+  <h1>AZ-900 학습 도우미</h1>
+  <p class="subtitle">Microsoft Azure Fundamentals · 10일 집중 코스</p>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab-btn active" data-tab="flashcards">플래시카드</button>
+  <button class="tab-btn" data-tab="quiz">퀴즈</button>
+  <button class="tab-btn" data-tab="progress">진행 상황</button>
+</nav>
+
+<main>
+  <!-- 플래시카드 -->
+  <section id="tab-flashcards" class="tab-panel active">
+    <div class="controls">
+      <label for="fc-topic">주제:</label>
+      <select id="fc-topic"></select>
+      <button id="fc-shuffle">섞기</button>
+    </div>
+    <div class="fc-progress" id="fc-progress"></div>
+    <div id="fc-card" class="flashcard">
+      <div class="flashcard-inner">
+        <div class="flashcard-front"></div>
+        <div class="flashcard-back"></div>
+      </div>
+    </div>
+    <div class="fc-nav">
+      <button id="fc-prev">← 이전</button>
+      <button id="fc-flip">뒤집기</button>
+      <button id="fc-next">다음 →</button>
+    </div>
+  </section>
+
+  <!-- 퀴즈 -->
+  <section id="tab-quiz" class="tab-panel">
+    <div id="quiz-setup" class="controls">
+      <label for="quiz-topic">주제:</label>
+      <select id="quiz-topic">
+        <option value="all">전체(모의고사)</option>
+      </select>
+      <label for="quiz-count">문항 수:</label>
+      <select id="quiz-count">
+        <option value="5">5</option>
+        <option value="10" selected>10</option>
+        <option value="20">20</option>
+        <option value="999">전체</option>
+      </select>
+      <button id="quiz-start">퀴즈 시작</button>
+    </div>
+
+    <div id="quiz-play" class="hidden">
+      <div class="quiz-meta">
+        <span id="quiz-progress"></span>
+        <span id="quiz-score"></span>
+      </div>
+      <div id="quiz-question" class="quiz-question"></div>
+      <div id="quiz-options" class="quiz-options"></div>
+      <div id="quiz-explain" class="quiz-explain hidden"></div>
+      <div class="quiz-nav">
+        <button id="quiz-next" class="hidden">다음 문제 →</button>
+      </div>
+    </div>
+
+    <div id="quiz-result" class="hidden">
+      <h2>결과</h2>
+      <p id="quiz-result-summary"></p>
+      <div id="quiz-review"></div>
+      <button id="quiz-restart">다시 풀기</button>
+    </div>
+  </section>
+
+  <!-- 진행 상황 -->
+  <section id="tab-progress" class="tab-panel">
+    <p class="hint">체크리스트는 브라우저(localStorage)에 저장됩니다. 다른 기기/브라우저와는 공유되지 않습니다.</p>
+    <div id="progress-summary" class="progress-summary"></div>
+    <div id="progress-days"></div>
+  </section>
+</main>
+
+<footer class="app-footer">
+  <p>AZ-900 스터디 프로그램 · <a href="../study-plan.md">학습 계획 문서 보기</a></p>
+</footer>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
