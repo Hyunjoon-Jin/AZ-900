@@ -57,6 +57,7 @@
       document.getElementById("tab-" + activeTab).classList.add("active");
       moveIndicatorTo(btn);
       if (activeTab === "leveltest") refreshLevelIntro();
+      if (activeTab === "materials") loadMaterialsDoc(currentMaterialsDoc);
     });
   });
   window.addEventListener("resize", () => {
@@ -65,6 +66,207 @@
   });
   // 초기 레이아웃 계산 이후 위치를 잡는다
   requestAnimationFrame(() => moveIndicatorTo(document.querySelector(".tab-btn.active")));
+
+  document.querySelectorAll("[data-goto-tab]").forEach((el) => {
+    el.addEventListener("click", () => {
+      document.querySelector(`.tab-btn[data-tab="${el.dataset.gotoTab}"]`).click();
+    });
+  });
+
+  // ---------- 학습 자료 (마크다운 뷰어) ----------
+  const MATERIALS_DOCS = {
+    "study-plan": "content/study-plan.md",
+    "study-guide": "content/study-guide.md",
+  };
+  const materialsCache = {};
+  let currentMaterialsDoc = "study-plan";
+
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function mdInline(text) {
+    let s = escapeHtml(text);
+    s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    return s;
+  }
+
+  function splitTableRow(line) {
+    return line
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((c) => c.trim());
+  }
+
+  function isBlockStart(line) {
+    return (
+      /^\s*$/.test(line) ||
+      /^#{1,6}\s+/.test(line) ||
+      /^---+\s*$/.test(line) ||
+      /^>\s?/.test(line) ||
+      /^\s*\|/.test(line) ||
+      /^\s*[-*]\s+/.test(line) ||
+      /^\s*\d+\.\s+/.test(line)
+    );
+  }
+
+  function renderMarkdown(md) {
+    const lines = md.replace(/\r\n/g, "\n").split("\n");
+    let html = "";
+    let i = 0;
+    let listBuffer = null;
+
+    function flushList() {
+      if (!listBuffer) return;
+      const tag = listBuffer.type;
+      html += `<${tag}>` + listBuffer.items.map((it) => `<li>${it}</li>`).join("") + `</${tag}>`;
+      listBuffer = null;
+    }
+
+    function consumeContinuation() {
+      const parts = [];
+      while (i < lines.length && lines[i].trim() !== "" && !isBlockStart(lines[i])) {
+        parts.push(lines[i].trim());
+        i++;
+      }
+      return parts;
+    }
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      if (/^\s*$/.test(line)) {
+        flushList();
+        i++;
+        continue;
+      }
+
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      if (h) {
+        flushList();
+        const level = h[1].length;
+        html += `<h${level}>${mdInline(h[2])}</h${level}>`;
+        i++;
+        continue;
+      }
+
+      if (/^---+\s*$/.test(line)) {
+        flushList();
+        html += "<hr>";
+        i++;
+        continue;
+      }
+
+      if (/^>\s?/.test(line)) {
+        flushList();
+        const quoteLines = [];
+        while (i < lines.length && /^>\s?/.test(lines[i])) {
+          quoteLines.push(lines[i].replace(/^>\s?/, ""));
+          i++;
+        }
+        html += `<blockquote>${mdInline(quoteLines.join(" "))}</blockquote>`;
+        continue;
+      }
+
+      if (/^\s*\|/.test(line) && lines[i + 1] && /^\s*\|?[\s:|-]+\|[\s:|-]*\s*$/.test(lines[i + 1])) {
+        flushList();
+        const headerCells = splitTableRow(line);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && /^\s*\|/.test(lines[i])) {
+          rows.push(splitTableRow(lines[i]));
+          i++;
+        }
+        html +=
+          '<div class="md-table-wrap"><table><thead><tr>' +
+          headerCells.map((c) => `<th>${mdInline(c)}</th>`).join("") +
+          "</tr></thead><tbody>" +
+          rows.map((r) => "<tr>" + r.map((c) => `<td>${mdInline(c)}</td>`).join("") + "</tr>").join("") +
+          "</tbody></table></div>";
+        continue;
+      }
+
+      const ul = line.match(/^\s*[-*]\s+(?:\[( |x|X)\]\s+)?(.*)$/);
+      if (ul) {
+        if (!listBuffer || listBuffer.type !== "ul") {
+          flushList();
+          listBuffer = { type: "ul", items: [] };
+        }
+        i++;
+        const continuation = consumeContinuation();
+        const text = [ul[2]].concat(continuation).join(" ");
+        const checkbox =
+          ul[1] !== undefined
+            ? `<span class="md-checkbox${ul[1].toLowerCase() === "x" ? " checked" : ""}"></span>`
+            : "";
+        listBuffer.items.push(checkbox + mdInline(text));
+        continue;
+      }
+
+      const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+      if (ol) {
+        if (!listBuffer || listBuffer.type !== "ol") {
+          flushList();
+          listBuffer = { type: "ol", items: [] };
+        }
+        i++;
+        const continuation = consumeContinuation();
+        const text = [ol[1]].concat(continuation).join(" ");
+        listBuffer.items.push(mdInline(text));
+        continue;
+      }
+
+      flushList();
+      const paraLines = [line];
+      i++;
+      while (i < lines.length && lines[i].trim() !== "" && !isBlockStart(lines[i])) {
+        paraLines.push(lines[i]);
+        i++;
+      }
+      html += `<p>${mdInline(paraLines.join(" "))}</p>`;
+    }
+    flushList();
+    return html;
+  }
+
+  function loadMaterialsDoc(docKey) {
+    const body = document.getElementById("materials-body");
+    if (materialsCache[docKey]) {
+      body.innerHTML = materialsCache[docKey];
+      return;
+    }
+    body.innerHTML = '<p class="hint">불러오는 중…</p>';
+    fetch(MATERIALS_DOCS[docKey])
+      .then((res) => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.text();
+      })
+      .then((md) => {
+        const html = renderMarkdown(md);
+        materialsCache[docKey] = html;
+        if (currentMaterialsDoc === docKey) body.innerHTML = html;
+      })
+      .catch(() => {
+        body.innerHTML =
+          '<p class="hint">문서를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>';
+      });
+  }
+
+  document.querySelectorAll(".materials-switch-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".materials-switch-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentMaterialsDoc = btn.dataset.doc;
+      loadMaterialsDoc(currentMaterialsDoc);
+    });
+  });
 
   function shuffle(arr) {
     const a = arr.slice();
