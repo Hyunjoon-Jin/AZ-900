@@ -56,6 +56,7 @@
       activeTab = btn.dataset.tab;
       document.getElementById("tab-" + activeTab).classList.add("active");
       moveIndicatorTo(btn);
+      if (activeTab === "leveltest") refreshLevelIntro();
     });
   });
   window.addEventListener("resize", () => {
@@ -147,6 +148,67 @@
     }
   }
 
+  // ---------- 사용자 레벨 ----------
+  const LEVEL_KEY = "az900-level-v1";
+  function loadLevel() {
+    try {
+      return JSON.parse(localStorage.getItem(LEVEL_KEY));
+    } catch (e) {
+      return null;
+    }
+  }
+  function saveLevel(obj) {
+    localStorage.setItem(LEVEL_KEY, JSON.stringify(obj));
+  }
+  function levelLabel(level) {
+    return { beginner: "초급", intermediate: "중급", advanced: "고급" }[level] || level;
+  }
+  function computeLevel(pct) {
+    if (pct >= 76) return "advanced";
+    if (pct >= 41) return "intermediate";
+    return "beginner";
+  }
+  function currentLevelKey() {
+    const lv = loadLevel();
+    return lv ? lv.level : "beginner";
+  }
+  // 레벨별 기본 펼침 상태: 초급=요약만, 중급=요약+상세, 고급=전부 펼침
+  function defaultOpenFor(level, field) {
+    if (field === "detail") return level === "intermediate" || level === "advanced";
+    if (field === "tip") return level === "advanced";
+    return false;
+  }
+
+  const levelBadge = document.getElementById("level-badge");
+  function renderLevelBadge() {
+    const lv = loadLevel();
+    if (!lv) {
+      levelBadge.textContent = "레벨 테스트";
+      levelBadge.classList.add("unset");
+    } else {
+      levelBadge.textContent = "Lv. " + levelLabel(lv.level);
+      levelBadge.classList.remove("unset");
+    }
+  }
+  levelBadge.addEventListener("click", () => {
+    document.querySelector('.tab-btn[data-tab="leveltest"]').click();
+  });
+  renderLevelBadge();
+
+  // 토글 버튼 하나로 detail/tip 섹션을 펼치고 접는 공용 헬퍼
+  function wireDisclosure(blockId, toggleId) {
+    const block = document.getElementById(blockId);
+    const toggle = document.getElementById(toggleId);
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      block.classList.toggle("open");
+    });
+  }
+  wireDisclosure("fc-detail-block", "fc-detail-toggle");
+  wireDisclosure("fc-tip-block", "fc-tip-toggle");
+  wireDisclosure("quiz-detail-block", "quiz-detail-toggle");
+  wireDisclosure("quiz-tip-block", "quiz-tip-toggle");
+
   // ---------- 플래시카드 ----------
   FLASHCARDS.forEach((c, i) => { c.id = i; });
 
@@ -224,6 +286,12 @@
     fcTag.innerHTML = dotHtml(domainColor(topicDomain(card.topic))) +
       topicLabel(card.topic) + (mastered.has(card.id) ? " · 암기완료" : "");
     fcProgress.textContent = `${fcIndex + 1} / ${fcDeck.length}`;
+
+    const level = currentLevelKey();
+    document.getElementById("fc-detail-text").textContent = card.detail;
+    document.getElementById("fc-tip-text").textContent = card.tip;
+    document.getElementById("fc-detail-block").classList.toggle("open", defaultOpenFor(level, "detail"));
+    document.getElementById("fc-tip-block").classList.toggle("open", defaultOpenFor(level, "tip"));
   }
 
   function fcAdvance() {
@@ -330,6 +398,8 @@
     quizAnswered = false;
     quizExplainEl.classList.add("hidden");
     quizNextBtn.classList.add("hidden");
+    document.getElementById("quiz-detail-block").classList.add("hidden");
+    document.getElementById("quiz-tip-block").classList.add("hidden");
     const item = quizDeck[quizIndex];
     quizMeterFill.style.width = Math.round((quizIndex / quizDeck.length) * 100) + "%";
     quizMeterLabel.textContent = `${quizIndex + 1}/${quizDeck.length}`;
@@ -367,6 +437,17 @@
 
     quizExplainEl.textContent = (correct ? "정답! " : "오답. ") + item.explain;
     quizExplainEl.classList.remove("hidden");
+
+    const level = currentLevelKey();
+    const detailBlock = document.getElementById("quiz-detail-block");
+    const tipBlock = document.getElementById("quiz-tip-block");
+    document.getElementById("quiz-detail-text").textContent = item.detail;
+    document.getElementById("quiz-tip-text").textContent = item.tip;
+    detailBlock.classList.remove("hidden");
+    tipBlock.classList.remove("hidden");
+    detailBlock.classList.toggle("open", defaultOpenFor(level, "detail"));
+    tipBlock.classList.toggle("open", defaultOpenFor(level, "tip"));
+
     quizScoreEl.textContent = `점수 ${quizScore}`;
     quizMeterFill.style.width = Math.round(((quizIndex + 1) / quizDeck.length) * 100) + "%";
     quizNextBtn.classList.remove("hidden");
@@ -455,6 +536,136 @@
     quizSetup.classList.remove("hidden");
   });
 
+  // ---------- 레벨테스트 ----------
+  const lvlSetup = document.getElementById("lvl-setup");
+  const lvlPlay = document.getElementById("lvl-play");
+  const lvlResult = document.getElementById("lvl-result");
+  const lvlQuestionEl = document.getElementById("lvl-question");
+  const lvlOptionsEl = document.getElementById("lvl-options");
+  const lvlProgressEl = document.getElementById("lvl-progress");
+  const lvlMeterFill = document.getElementById("lvl-meter-fill");
+  const lvlMeterLabel = document.getElementById("lvl-meter-label");
+  const LEVEL_TEST_SIZE = 12;
+
+  let lvlDeck = [];
+  let lvlIndex = 0;
+  let lvlScore = 0;
+  let lvlBusy = false;
+
+  function refreshLevelIntro() {
+    const lv = loadLevel();
+    const el = document.getElementById("lvl-current");
+    if (lv) {
+      el.textContent = `현재 레벨: ${levelLabel(lv.level)} (최근 점수 ${lv.pct}%) — 다시 테스트하면 갱신됩니다.`;
+      el.classList.remove("hidden");
+    } else {
+      el.classList.add("hidden");
+    }
+  }
+  refreshLevelIntro();
+
+  // 도메인이 골고루 섞이도록 주제별로 라운드로빈 방식으로 문항을 뽑는다
+  function sampleLevelTestQuestions() {
+    const byTopic = TOPICS.map((t) => shuffle(QUIZ.filter((q) => q.topic === t.key)));
+    const picked = [];
+    let round = 0;
+    while (picked.length < LEVEL_TEST_SIZE) {
+      const before = picked.length;
+      byTopic.forEach((pool) => {
+        if (picked.length < LEVEL_TEST_SIZE && pool[round]) picked.push(pool[round]);
+      });
+      round++;
+      if (picked.length === before) break;
+    }
+    return shuffle(picked).slice(0, LEVEL_TEST_SIZE);
+  }
+
+  function startLevelTest() {
+    lvlDeck = sampleLevelTestQuestions().map(shuffleOptions);
+    lvlIndex = 0;
+    lvlScore = 0;
+    lvlBusy = false;
+    lvlSetup.classList.add("hidden");
+    lvlResult.classList.add("hidden");
+    lvlPlay.classList.remove("hidden");
+    renderLvlQuestion();
+  }
+
+  function renderLvlQuestion() {
+    lvlBusy = false;
+    const item = lvlDeck[lvlIndex];
+    lvlMeterFill.style.width = Math.round((lvlIndex / lvlDeck.length) * 100) + "%";
+    lvlMeterLabel.textContent = `${lvlIndex + 1}/${lvlDeck.length}`;
+    lvlProgressEl.innerHTML = dotHtml(domainColor(topicDomain(item.topic))) + topicLabel(item.topic);
+    lvlQuestionEl.textContent = item.q;
+    lvlOptionsEl.innerHTML = "";
+    item.options.forEach((optText, idx) => {
+      const btn = document.createElement("button");
+      btn.className = "quiz-option";
+      const keyEl = document.createElement("span");
+      keyEl.className = "opt-key";
+      keyEl.textContent = OPT_KEYS[idx];
+      btn.appendChild(keyEl);
+      btn.appendChild(document.createTextNode(optText));
+      btn.addEventListener("click", () => selectLvlAnswer(idx));
+      lvlOptionsEl.appendChild(btn);
+    });
+  }
+
+  function selectLvlAnswer(idx) {
+    if (lvlBusy) return;
+    lvlBusy = true;
+    const item = lvlDeck[lvlIndex];
+    const correct = idx === item.answer;
+    if (correct) lvlScore++;
+
+    const optionEls = lvlOptionsEl.querySelectorAll(".quiz-option");
+    optionEls.forEach((el, i) => {
+      el.disabled = true;
+      if (i === item.answer) el.classList.add("correct");
+      else if (i === idx) el.classList.add("incorrect");
+    });
+    lvlMeterFill.style.width = Math.round(((lvlIndex + 1) / lvlDeck.length) * 100) + "%";
+
+    setTimeout(() => {
+      lvlIndex++;
+      if (lvlIndex < lvlDeck.length) {
+        renderLvlQuestion();
+      } else {
+        showLevelResult();
+      }
+    }, 650);
+  }
+
+  function showLevelResult() {
+    lvlPlay.classList.add("hidden");
+    lvlResult.classList.remove("hidden");
+    const pct = Math.round((lvlScore / lvlDeck.length) * 100);
+    const level = computeLevel(pct);
+    saveLevel({ level, pct });
+    renderLevelBadge();
+    refreshLevelIntro();
+
+    animateDonut(document.getElementById("lvl-donut"), document.getElementById("lvl-donut-value"), pct);
+    document.getElementById("lvl-badge-title").textContent = `레벨: ${levelLabel(level)}`;
+    document.getElementById("lvl-result-caption").textContent = `${lvlDeck.length}문항 중 ${lvlScore}개 정답 (${pct}%)`;
+    document.getElementById("lvl-result-detail").textContent =
+      level === "advanced"
+        ? "탄탄한 기본기를 갖췄어요. 플래시카드·퀴즈에서 상세 설명과 실전 팁까지 기본으로 펼쳐서 보여드릴게요."
+        : level === "intermediate"
+        ? "기본 개념은 잡혀 있어요. 상세 설명은 기본으로 펼쳐 드리고, 실전 팁은 필요할 때 펼쳐보세요."
+        : "차근차근 시작해봐요. 우선 핵심 요약 위주로 보여드리고, 더 알고 싶을 때 상세 설명과 실전 팁을 펼쳐볼 수 있어요.";
+  }
+
+  document.getElementById("lvl-start").addEventListener("click", startLevelTest);
+  document.getElementById("lvl-retry").addEventListener("click", () => {
+    lvlResult.classList.add("hidden");
+    lvlSetup.classList.remove("hidden");
+  });
+  document.getElementById("lvl-goto-study").addEventListener("click", () => {
+    document.querySelector('.tab-btn[data-tab="flashcards"]').click();
+  });
+
   // ---------- 키보드 단축키 ----------
   document.addEventListener("keydown", (e) => {
     if (isTypingTarget(e.target)) return;
@@ -471,6 +682,10 @@
           e.preventDefault();
           quizGoNext();
         }
+      }
+    } else if (activeTab === "leveltest") {
+      if (!lvlPlay.classList.contains("hidden") && !lvlBusy && OPT_KEYS.includes(e.key)) {
+        selectLvlAnswer(OPT_KEYS.indexOf(e.key));
       }
     }
   });

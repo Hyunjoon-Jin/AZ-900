@@ -197,6 +197,72 @@ body::before {
 .theme-toggle[data-mode="dark"] .icon-moon { display: block; }
 .theme-toggle[data-mode="system"] .icon-auto { display: block; }
 
+.level-badge {
+  position: absolute;
+  top: 0.9rem;
+  left: 1rem;
+  height: 36px;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
+}
+.level-badge:hover { transform: translateY(-1px); border-color: var(--accent); }
+.level-badge.unset {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.level-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* ---------- Progressive disclosure (detail / tip) ---------- */
+.disclosure {
+  margin-top: 0.6rem;
+  text-align: left;
+}
+.disclosure-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-strong);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.disclosure-toggle .chevron { width: 14px; height: 14px; transition: transform 0.2s ease; }
+.disclosure.open .disclosure-toggle .chevron { transform: rotate(90deg); }
+.disclosure-content {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+.disclosure.open .disclosure-content { grid-template-rows: 1fr; }
+.disclosure-content > .disclosure-text {
+  overflow: hidden;
+  margin: 0.45rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.disclosure-content { overflow: hidden; }
+
 /* ---------- Tabs (sliding indicator) ---------- */
 .tabs {
   position: relative;
@@ -479,7 +545,14 @@ button {
 }
 .flashcard-back {
   transform: rotateY(180deg);
+  align-items: stretch;
+  justify-content: flex-start;
+  overflow-y: auto;
+  padding-top: 1.8rem;
 }
+.fc-back-scroll { width: 100%; }
+.flashcard-back .fc-text { text-align: center; }
+.flashcard-back .disclosure { text-align: left; }
 
 .fc-actions {
   display: flex;
@@ -508,6 +581,16 @@ button {
   margin-bottom: 0.6rem;
 }
 .empty-state p { font-size: 1.05rem; margin-bottom: 1rem; color: var(--text-secondary); }
+
+/* ---------- Level test ---------- */
+.level-intro {
+  text-align: center;
+  max-width: 440px;
+  margin: 1.5rem auto 0;
+}
+.level-intro .empty-icon { color: var(--accent); width: 40px; height: 40px; }
+.level-intro .hint { margin-bottom: 1.2rem; }
+#lvl-current { margin-bottom: 0.6rem; font-weight: 600; }
 
 /* ---------- Quiz ---------- */
 .quiz-meta {
