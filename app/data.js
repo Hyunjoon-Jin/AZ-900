@@ -149,55 +149,55 @@ const QUIZ = [
 ];
 
 const PLAN_DAYS = [
-  { day: 1, title: "클라우드 개념 기초", items: [
+  { day: 1, domain: 1, title: "클라우드 개념 기초", items: [
     "클라우드 이점: HA/확장성/탄력성/민첩성/DR",
     "비용 모델: CapEx vs OpEx, 종량제",
     "클라우드 vs 온프레미스 비교표 작성",
     "Microsoft Learn '클라우드 컴퓨팅 개념' 완료",
     "플래시카드 '클라우드 개념' 1회 학습",
   ]},
-  { day: 2, title: "서비스/배포 모델", items: [
+  { day: 2, domain: 1, title: "서비스/배포 모델", items: [
     "IaaS/PaaS/SaaS 정의 및 책임 분담 비교",
     "공유 책임 모델 이해",
     "배포 모델: 퍼블릭/프라이빗/하이브리드/멀티클라우드",
     "서비스 모델별 Azure 서비스 예시 정리",
     "퀴즈 '클라우드 개념' 세트 풀이 (목표 80%+)",
   ]},
-  { day: 3, title: "Azure 핵심 아키텍처", items: [
+  { day: 3, domain: 2, title: "Azure 핵심 아키텍처", items: [
     "리전/리전 페어/소버린 리전 개념",
     "가용성 영역 vs 가용성 집합 차이",
     "관리 그룹→구독→리소스 그룹→리소스 계층 구조",
     "ARM의 역할과 템플릿 개념",
     "플래시카드 'Azure 아키텍처' 1회 학습",
   ]},
-  { day: 4, title: "컴퓨팅 서비스", items: [
+  { day: 4, domain: 2, title: "컴퓨팅 서비스", items: [
     "VM, VM Scale Sets",
     "App Service, ACI, AKS",
     "Azure Functions vs Logic Apps",
     "Azure Virtual Desktop 개요",
     "퀴즈 '컴퓨팅 서비스' 세트 풀이",
   ]},
-  { day: 5, title: "네트워킹 서비스", items: [
+  { day: 5, domain: 2, title: "네트워킹 서비스", items: [
     "VNet, 서브넷 개념",
     "VPN Gateway vs ExpressRoute",
     "Azure DNS, Load Balancer vs App Gateway vs Traffic Manager",
     "Azure CDN, Front Door 개요",
     "플래시카드 '네트워킹' 1회 학습",
   ]},
-  { day: 6, title: "스토리지 서비스", items: [
+  { day: 6, domain: 2, title: "스토리지 서비스", items: [
     "Blob/Disk/File/Queue/Table 차이",
     "Blob 액세스 계층: Hot/Cool/Archive",
     "중복 옵션: LRS/ZRS/GRS/GZRS",
     "데이터 이전 도구: Migrate/Data Box/File Sync",
     "퀴즈 '스토리지' 세트 풀이",
   ]},
-  { day: 7, title: "복습 + 모의고사 1", items: [
+  { day: 7, domain: 'mixed', title: "복습 + 모의고사 1", items: [
     "Day 1~6 플래시카드 재학습(오답 위주)",
     "종합 모의고사 1 (도메인 1~2, 목표 80%+)",
     "오답 노트 정리",
     "취약 주제 재학습",
   ]},
-  { day: 8, title: "ID/액세스/보안", items: [
+  { day: 8, domain: 3, title: "ID/액세스/보안", items: [
     "Entra ID: 인증 vs 인가",
     "MFA, 조건부 액세스, SSO",
     "RBAC 개념과 범위",
@@ -205,14 +205,14 @@ const PLAN_DAYS = [
     "Defender for Cloud, Sentinel 개요",
     "플래시카드 'ID/보안' 1회 학습",
   ]},
-  { day: 9, title: "비용 관리 및 거버넌스", items: [
+  { day: 9, domain: 3, title: "비용 관리 및 거버넌스", items: [
     "Pricing Calculator vs TCO Calculator",
     "Cost Management, 예산, 태그",
     "Azure Policy, Resource Locks, Blueprints",
     "Cloud Adoption Framework 개요",
     "퀴즈 '비용 관리·거버넌스' 세트 풀이",
   ]},
-  { day: 10, title: "모니터링/관리도구 + 최종 모의고사", items: [
+  { day: 10, domain: 3, title: "모니터링/관리도구 + 최종 모의고사", items: [
     "Azure Monitor, Log Analytics, Advisor, Service Health",
     "Portal vs CLI vs PowerShell vs Cloud Shell",
     "종합 모의고사 2 (전 도메인, 목표 85%+)",

@@ -3,6 +3,10 @@
 (function () {
   "use strict";
 
+  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const CHECK_ICON = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4 10-10"/></svg>';
+  const CROSS_ICON = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
   // ---------- 테마 토글 ----------
   const THEME_KEY = "az900-theme-v1";
   const themeBtn = document.getElementById("theme-toggle");
@@ -28,10 +32,21 @@
     applyTheme(themeMode);
   });
 
-  // ---------- 탭 전환 ----------
+  // ---------- 탭 전환 (슬라이딩 인디케이터) ----------
+  const tabsEl = document.querySelector(".tabs");
+  const tabIndicator = document.getElementById("tab-indicator");
   const tabButtons = document.querySelectorAll(".tab-btn");
   const tabPanels = document.querySelectorAll(".tab-panel");
   let activeTab = "flashcards";
+
+  function moveIndicatorTo(btn) {
+    const btnRect = btn.getBoundingClientRect();
+    const parentRect = tabsEl.getBoundingClientRect();
+    tabIndicator.style.width = btnRect.width + "px";
+    tabIndicator.style.height = btnRect.height + "px";
+    tabIndicator.style.transform = `translate(${btnRect.left - parentRect.left}px, ${btnRect.top - parentRect.top}px)`;
+  }
+
   tabButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
       tabButtons.forEach((b) => { b.classList.remove("active"); b.setAttribute("aria-selected", "false"); });
@@ -40,8 +55,15 @@
       btn.setAttribute("aria-selected", "true");
       activeTab = btn.dataset.tab;
       document.getElementById("tab-" + activeTab).classList.add("active");
+      moveIndicatorTo(btn);
     });
   });
+  window.addEventListener("resize", () => {
+    const current = document.querySelector(".tab-btn.active");
+    if (current) moveIndicatorTo(current);
+  });
+  // 초기 레이아웃 계산 이후 위치를 잡는다
+  requestAnimationFrame(() => moveIndicatorTo(document.querySelector(".tab-btn.active")));
 
   function shuffle(arr) {
     const a = arr.slice();
@@ -55,6 +77,19 @@
   function topicLabel(key) {
     const t = TOPICS.find((t) => t.key === key);
     return t ? t.label : key;
+  }
+  function topicDomain(key) {
+    const t = TOPICS.find((t) => t.key === key);
+    return t ? t.domain : null;
+  }
+  function domainColor(domain) {
+    if (domain === 1) return "var(--domain-1)";
+    if (domain === 2) return "var(--domain-2)";
+    if (domain === 3) return "var(--domain-3)";
+    return "var(--domain-mixed)";
+  }
+  function dotHtml(color) {
+    return `<span class="domain-dot" style="background:${color}"></span>`;
   }
 
   function populateTopicSelect(sel, includeAll) {
@@ -75,6 +110,41 @@
 
   function isTypingTarget(el) {
     return el && ["SELECT", "INPUT", "TEXTAREA"].includes(el.tagName);
+  }
+
+  // 도넛/퍼센트 카운트업 애니메이션 (하나의 헬퍼로 통일)
+  function animateDonut(donutEl, valueEl, pct) {
+    if (prefersReducedMotion) {
+      donutEl.style.setProperty("--pct", pct);
+      valueEl.textContent = pct + "%";
+      return;
+    }
+    donutEl.style.setProperty("--pct", pct);
+    const start = performance.now();
+    const duration = 700;
+    function tick(now) {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      valueEl.textContent = Math.round(eased * pct) + "%";
+      if (t < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  const CONFETTI_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"];
+  function launchConfetti() {
+    if (prefersReducedMotion) return;
+    const count = 32;
+    for (let i = 0; i < count; i++) {
+      const piece = document.createElement("div");
+      piece.className = "confetti-piece";
+      piece.style.left = Math.random() * 100 + "vw";
+      piece.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+      piece.style.animationDelay = (Math.random() * 0.3) + "s";
+      piece.style.animationDuration = (1.3 + Math.random() * 0.8) + "s";
+      document.body.appendChild(piece);
+      piece.addEventListener("animationend", () => piece.remove());
+    }
   }
 
   // ---------- 플래시카드 ----------
@@ -150,7 +220,9 @@
     const card = fcDeck[fcIndex];
     fcFrontText.textContent = card.front;
     fcBackText.textContent = card.back;
-    fcTag.textContent = topicLabel(card.topic) + (mastered.has(card.id) ? " · 암기완료" : "");
+    fcCard.style.setProperty("--card-domain", domainColor(topicDomain(card.topic)));
+    fcTag.innerHTML = dotHtml(domainColor(topicDomain(card.topic))) +
+      topicLabel(card.topic) + (mastered.has(card.id) ? " · 암기완료" : "");
     fcProgress.textContent = `${fcIndex + 1} / ${fcDeck.length}`;
   }
 
@@ -261,7 +333,7 @@
     const item = quizDeck[quizIndex];
     quizMeterFill.style.width = Math.round((quizIndex / quizDeck.length) * 100) + "%";
     quizMeterLabel.textContent = `${quizIndex + 1}/${quizDeck.length}`;
-    quizProgressEl.textContent = topicLabel(item.topic);
+    quizProgressEl.innerHTML = dotHtml(domainColor(topicDomain(item.topic))) + topicLabel(item.topic);
     quizScoreEl.textContent = `점수 ${quizScore}`;
     quizQuestionEl.textContent = item.q;
     quizOptionsEl.innerHTML = "";
@@ -316,15 +388,15 @@
     quizResult.classList.remove("hidden");
     const pct = Math.round((quizScore / quizDeck.length) * 100);
 
-    const donut = document.getElementById("quiz-donut");
-    donut.style.setProperty("--pct", pct);
-    document.getElementById("quiz-donut-value").textContent = pct + "%";
+    animateDonut(document.getElementById("quiz-donut"), document.getElementById("quiz-donut-value"), pct);
     document.getElementById("quiz-result-summary").textContent =
       `${quizDeck.length}문항 중 ${quizScore}개 정답`;
     document.getElementById("quiz-result-caption").textContent =
       pct >= 85 ? "훌륭해요! 실전 감각이 준비됐어요." :
       pct >= 70 ? "합격권이에요. 오답 노트만 한 번 더 보세요." :
       "취약 주제를 다시 학습하고 재도전해 보세요.";
+
+    if (pct >= 85) launchConfetti();
 
     // 주제별 정답률
     const byTopic = {};
@@ -342,7 +414,7 @@
       const row = document.createElement("div");
       row.className = "topic-row";
       row.innerHTML = `
-        <span class="topic-name">${topicLabel(t)}</span>
+        <span class="topic-name">${dotHtml(domainColor(topicDomain(t)))}${topicLabel(t)}</span>
         <div class="meter" role="progressbar" aria-label="${topicLabel(t)} 정답률">
           <div class="meter-fill" style="width:${tPct}%"></div>
         </div>
@@ -359,10 +431,10 @@
       div.className = "review-item " + (log.correct ? "right" : "wrong");
       const chosenText = log.item.options[log.chosen];
       const correctText = log.item.options[log.item.answer];
-      div.innerHTML = `<div class="review-q">${i + 1}. ${log.item.q}</div>` +
-        (log.correct
-          ? `✅ 선택: ${chosenText}`
-          : `❌ 선택: ${chosenText} / 정답: ${correctText}`);
+      const tagHtml = log.correct
+        ? `<span class="review-tag right">${CHECK_ICON}선택: ${chosenText}</span>`
+        : `<span class="review-tag wrong">${CROSS_ICON}선택: ${chosenText}</span> / 정답: ${correctText}`;
+      div.innerHTML = `<div class="review-q">${i + 1}. ${log.item.q}</div>` + tagHtml;
       reviewEl.appendChild(div);
     });
 
@@ -431,22 +503,38 @@
       totalItems += day.items.length;
       checkedItems += dayChecked;
       const dayPct = Math.round((dayChecked / day.items.length) * 100);
+      const dColor = domainColor(day.domain);
 
-      // 상단 10일 미니 오버뷰
+      // 상단 10일 미니 오버뷰 (클릭 시 해당 일차로 스크롤)
+      const col = document.createElement("div");
+      col.className = "day-col";
       const chip = document.createElement("div");
       chip.className = "day-chip";
       chip.title = `Day ${day.day}: ${dayChecked}/${day.items.length}`;
-      chip.innerHTML = `<div class="day-chip-fill" style="height:${dayPct}%"></div><span>${day.day}</span>`;
-      overviewEl.appendChild(chip);
+      chip.innerHTML = `<div class="day-chip-fill" style="height:${dayPct}%;background:${dColor}"></div>`;
+      chip.addEventListener("click", () => {
+        const target = document.getElementById(`day-card-${day.day}`);
+        if (!target) return;
+        target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
+        target.classList.add("pulse");
+        setTimeout(() => target.classList.remove("pulse"), 900);
+      });
+      const label = document.createElement("div");
+      label.className = "day-chip-label";
+      label.textContent = day.day;
+      col.appendChild(chip);
+      col.appendChild(label);
+      overviewEl.appendChild(col);
 
       // 일차 카드
       const card = document.createElement("div");
       card.className = "day-card";
+      card.id = `day-card-${day.day}`;
 
       const head = document.createElement("div");
       head.className = "day-card-head";
       head.innerHTML = `
-        <h3>Day ${day.day} · ${day.title}</h3>
+        <h3>${dotHtml(dColor)}Day ${day.day} · ${day.title}</h3>
         <div class="meter-row" style="margin-bottom:0;">
           <div class="meter" role="progressbar" aria-label="Day ${day.day} 진행률"><div class="meter-fill" style="width:${dayPct}%"></div></div>
           <span class="meter-label">${dayChecked}/${day.items.length}</span>
@@ -458,8 +546,8 @@
         const itemKey = `${day.day}-${idx}`;
         const checked = !!data[itemKey];
 
-        const label = document.createElement("label");
-        if (checked) label.classList.add("checked");
+        const itemLabel = document.createElement("label");
+        if (checked) itemLabel.classList.add("checked");
         const cb = document.createElement("input");
         cb.type = "checkbox";
         cb.checked = checked;
@@ -469,9 +557,9 @@
           saveProgress(d);
           renderProgress();
         });
-        label.appendChild(cb);
-        label.appendChild(document.createTextNode(itemText));
-        card.appendChild(label);
+        itemLabel.appendChild(cb);
+        itemLabel.appendChild(document.createTextNode(itemText));
+        card.appendChild(itemLabel);
       });
 
       container.appendChild(card);
@@ -479,9 +567,7 @@
 
     const pct = totalItems ? Math.round((checkedItems / totalItems) * 100) : 0;
     document.getElementById("progress-summary").textContent = `${checkedItems} / ${totalItems} 완료`;
-    const donut = document.getElementById("progress-donut");
-    donut.style.setProperty("--pct", pct);
-    document.getElementById("progress-donut-value").textContent = pct + "%";
+    animateDonut(document.getElementById("progress-donut"), document.getElementById("progress-donut-value"), pct);
   }
 
   renderProgress();
