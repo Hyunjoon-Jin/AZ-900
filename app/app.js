@@ -3,15 +3,43 @@
 (function () {
   "use strict";
 
+  // ---------- 테마 토글 ----------
+  const THEME_KEY = "az900-theme-v1";
+  const themeBtn = document.getElementById("theme-toggle");
+  const THEME_ORDER = ["system", "light", "dark"];
+
+  function applyTheme(mode) {
+    if (mode === "system") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", mode);
+    }
+    themeBtn.setAttribute("data-mode", mode);
+  }
+  function loadThemeMode() {
+    return localStorage.getItem(THEME_KEY) || "system";
+  }
+  let themeMode = loadThemeMode();
+  applyTheme(themeMode);
+  themeBtn.addEventListener("click", () => {
+    const idx = THEME_ORDER.indexOf(themeMode);
+    themeMode = THEME_ORDER[(idx + 1) % THEME_ORDER.length];
+    localStorage.setItem(THEME_KEY, themeMode);
+    applyTheme(themeMode);
+  });
+
   // ---------- 탭 전환 ----------
   const tabButtons = document.querySelectorAll(".tab-btn");
   const tabPanels = document.querySelectorAll(".tab-panel");
+  let activeTab = "flashcards";
   tabButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
-      tabButtons.forEach((b) => b.classList.remove("active"));
+      tabButtons.forEach((b) => { b.classList.remove("active"); b.setAttribute("aria-selected", "false"); });
       tabPanels.forEach((p) => p.classList.remove("active"));
       btn.classList.add("active");
-      document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+      btn.setAttribute("aria-selected", "true");
+      activeTab = btn.dataset.tab;
+      document.getElementById("tab-" + activeTab).classList.add("active");
     });
   });
 
@@ -29,24 +57,6 @@
     return t ? t.label : key;
   }
 
-  // 정답 위치를 무작위로 섞어 "항상 첫 번째가 정답"이 되지 않도록 함
-  function shuffleOptions(item) {
-    const order = shuffle(item.options.map((_, i) => i));
-    const options = order.map((i) => item.options[i]);
-    const answer = order.indexOf(item.answer);
-    return Object.assign({}, item, { options, answer });
-  }
-
-  // ---------- 플래시카드 ----------
-  const fcTopicSel = document.getElementById("fc-topic");
-  const fcCard = document.getElementById("fc-card");
-  const fcFront = fcCard.querySelector(".flashcard-front");
-  const fcBack = fcCard.querySelector(".flashcard-back");
-  const fcProgress = document.getElementById("fc-progress");
-
-  let fcDeck = [];
-  let fcIndex = 0;
-
   function populateTopicSelect(sel, includeAll) {
     sel.innerHTML = "";
     if (includeAll) {
@@ -62,49 +72,132 @@
       sel.appendChild(opt);
     });
   }
+
+  function isTypingTarget(el) {
+    return el && ["SELECT", "INPUT", "TEXTAREA"].includes(el.tagName);
+  }
+
+  // ---------- 플래시카드 ----------
+  FLASHCARDS.forEach((c, i) => { c.id = i; });
+
+  const MASTERED_KEY = "az900-mastered-v1";
+  function loadMastered() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(MASTERED_KEY)) || []);
+    } catch (e) {
+      return new Set();
+    }
+  }
+  function saveMastered(set) {
+    localStorage.setItem(MASTERED_KEY, JSON.stringify(Array.from(set)));
+  }
+  let mastered = loadMastered();
+
+  const fcTopicSel = document.getElementById("fc-topic");
+  const fcHideMastered = document.getElementById("fc-hide-mastered");
+  const fcCard = document.getElementById("fc-card");
+  const fcFrontText = fcCard.querySelector(".flashcard-front .fc-text");
+  const fcBackText = fcCard.querySelector(".flashcard-back .fc-text");
+  const fcTag = document.getElementById("fc-tag");
+  const fcProgress = document.getElementById("fc-progress");
+  const fcMeterFill = document.getElementById("fc-meter-fill");
+  const fcMeterLabel = document.getElementById("fc-meter-label");
+  const fcStage = document.querySelector(".fc-stage");
+  const fcActions = document.querySelector(".fc-actions");
+  const fcEmpty = document.getElementById("fc-empty");
+
   populateTopicSelect(fcTopicSel, true);
   fcTopicSel.value = "all";
 
-  function loadFcDeck() {
+  let fcPool = [];
+  let fcDeck = [];
+  let fcIndex = 0;
+
+  function fcPoolForTopic() {
     const topic = fcTopicSel.value;
-    const pool = topic === "all" ? FLASHCARDS : FLASHCARDS.filter((c) => c.topic === topic);
-    fcDeck = shuffle(pool);
+    return topic === "all" ? FLASHCARDS : FLASHCARDS.filter((c) => c.topic === topic);
+  }
+
+  function loadFcDeck() {
+    fcPool = fcPoolForTopic();
+    const filtered = fcHideMastered.checked ? fcPool.filter((c) => !mastered.has(c.id)) : fcPool;
+    fcDeck = shuffle(filtered);
     fcIndex = 0;
     renderFcCard();
   }
 
+  function updateFcMeter() {
+    const total = fcPool.length;
+    const known = fcPool.filter((c) => mastered.has(c.id)).length;
+    const pct = total ? Math.round((known / total) * 100) : 0;
+    fcMeterFill.style.width = pct + "%";
+    fcMeterLabel.textContent = `암기 ${known}/${total}`;
+  }
+
   function renderFcCard() {
+    updateFcMeter();
     fcCard.classList.remove("flipped");
     if (fcDeck.length === 0) {
-      fcFront.textContent = "카드가 없습니다.";
-      fcBack.textContent = "";
+      fcStage.classList.add("hidden");
+      fcActions.classList.add("hidden");
+      fcEmpty.classList.remove("hidden");
       fcProgress.textContent = "";
       return;
     }
+    fcStage.classList.remove("hidden");
+    fcActions.classList.remove("hidden");
+    fcEmpty.classList.add("hidden");
     const card = fcDeck[fcIndex];
-    fcFront.textContent = card.front;
-    fcBack.textContent = card.back;
-    fcProgress.textContent = `${fcIndex + 1} / ${fcDeck.length} · ${topicLabel(card.topic)}`;
+    fcFrontText.textContent = card.front;
+    fcBackText.textContent = card.back;
+    fcTag.textContent = topicLabel(card.topic) + (mastered.has(card.id) ? " · 암기완료" : "");
+    fcProgress.textContent = `${fcIndex + 1} / ${fcDeck.length}`;
   }
 
-  document.getElementById("fc-flip").addEventListener("click", () => {
-    fcCard.classList.toggle("flipped");
-  });
-  fcCard.addEventListener("click", () => {
-    fcCard.classList.toggle("flipped");
-  });
+  function fcAdvance() {
+    if (fcDeck.length === 0) return;
+    fcIndex = (fcIndex + 1) % fcDeck.length;
+    renderFcCard();
+  }
+
+  document.getElementById("fc-flip").addEventListener("click", () => fcCard.classList.toggle("flipped"));
+  fcCard.addEventListener("click", () => fcCard.classList.toggle("flipped"));
   document.getElementById("fc-prev").addEventListener("click", () => {
     if (fcDeck.length === 0) return;
     fcIndex = (fcIndex - 1 + fcDeck.length) % fcDeck.length;
     renderFcCard();
   });
-  document.getElementById("fc-next").addEventListener("click", () => {
-    if (fcDeck.length === 0) return;
-    fcIndex = (fcIndex + 1) % fcDeck.length;
-    renderFcCard();
-  });
+  document.getElementById("fc-next").addEventListener("click", fcAdvance);
   document.getElementById("fc-shuffle").addEventListener("click", loadFcDeck);
   fcTopicSel.addEventListener("change", loadFcDeck);
+  fcHideMastered.addEventListener("change", loadFcDeck);
+
+  document.getElementById("fc-know").addEventListener("click", () => {
+    if (fcDeck.length === 0) return;
+    const card = fcDeck[fcIndex];
+    mastered.add(card.id);
+    saveMastered(mastered);
+    if (fcHideMastered.checked) {
+      fcDeck.splice(fcIndex, 1);
+      if (fcIndex >= fcDeck.length) fcIndex = 0;
+      renderFcCard();
+    } else {
+      fcAdvance();
+    }
+  });
+  document.getElementById("fc-again").addEventListener("click", () => {
+    if (fcDeck.length === 0) return;
+    const card = fcDeck[fcIndex];
+    mastered.delete(card.id);
+    saveMastered(mastered);
+    fcAdvance();
+  });
+  document.getElementById("fc-empty-reset").addEventListener("click", () => {
+    fcPool.forEach((c) => mastered.delete(c.id));
+    saveMastered(mastered);
+    loadFcDeck();
+  });
+
   loadFcDeck();
 
   // ---------- 퀴즈 ----------
@@ -121,6 +214,9 @@
   const quizProgressEl = document.getElementById("quiz-progress");
   const quizScoreEl = document.getElementById("quiz-score");
   const quizNextBtn = document.getElementById("quiz-next");
+  const quizMeterFill = document.getElementById("quiz-meter-fill");
+  const quizMeterLabel = document.getElementById("quiz-meter-label");
+  const OPT_KEYS = ["1", "2", "3", "4"];
 
   let quizDeck = [];
   let quizIndex = 0;
@@ -128,15 +224,16 @@
   let quizAnswered = false;
   let quizLog = [];
 
-  document.getElementById("quiz-start").addEventListener("click", () => {
-    const topic = quizTopicSel.value;
-    const count = parseInt(quizCountSel.value, 10);
-    const pool = topic === "all" ? QUIZ : QUIZ.filter((q) => q.topic === topic);
-    quizDeck = shuffle(pool).slice(0, Math.min(count, pool.length)).map(shuffleOptions);
-    if (quizDeck.length === 0) {
-      alert("해당 주제에 문제가 없습니다.");
-      return;
-    }
+  // 정답 위치를 무작위로 섞어 "항상 첫 번째가 정답"이 되지 않도록 함
+  function shuffleOptions(item) {
+    const order = shuffle(item.options.map((_, i) => i));
+    const options = order.map((i) => item.options[i]);
+    const answer = order.indexOf(item.answer);
+    return Object.assign({}, item, { options, answer });
+  }
+
+  function startQuiz(items) {
+    quizDeck = items.map(shuffleOptions);
     quizIndex = 0;
     quizScore = 0;
     quizLog = [];
@@ -144,6 +241,17 @@
     quizResult.classList.add("hidden");
     quizPlay.classList.remove("hidden");
     renderQuizQuestion();
+  }
+
+  document.getElementById("quiz-start").addEventListener("click", () => {
+    const topic = quizTopicSel.value;
+    const count = parseInt(quizCountSel.value, 10);
+    const pool = topic === "all" ? QUIZ : QUIZ.filter((q) => q.topic === topic);
+    if (pool.length === 0) {
+      alert("해당 주제에 문제가 없습니다.");
+      return;
+    }
+    startQuiz(shuffle(pool).slice(0, Math.min(count, pool.length)));
   });
 
   function renderQuizQuestion() {
@@ -151,14 +259,20 @@
     quizExplainEl.classList.add("hidden");
     quizNextBtn.classList.add("hidden");
     const item = quizDeck[quizIndex];
-    quizProgressEl.textContent = `${quizIndex + 1} / ${quizDeck.length} · ${topicLabel(item.topic)}`;
-    quizScoreEl.textContent = `점수: ${quizScore}`;
+    quizMeterFill.style.width = Math.round((quizIndex / quizDeck.length) * 100) + "%";
+    quizMeterLabel.textContent = `${quizIndex + 1}/${quizDeck.length}`;
+    quizProgressEl.textContent = topicLabel(item.topic);
+    quizScoreEl.textContent = `점수 ${quizScore}`;
     quizQuestionEl.textContent = item.q;
     quizOptionsEl.innerHTML = "";
     item.options.forEach((optText, idx) => {
       const btn = document.createElement("button");
       btn.className = "quiz-option";
-      btn.textContent = optText;
+      const keyEl = document.createElement("span");
+      keyEl.className = "opt-key";
+      keyEl.textContent = OPT_KEYS[idx];
+      btn.appendChild(keyEl);
+      btn.appendChild(document.createTextNode(optText));
       btn.addEventListener("click", () => selectAnswer(idx));
       quizOptionsEl.appendChild(btn);
     });
@@ -181,26 +295,63 @@
 
     quizExplainEl.textContent = (correct ? "정답! " : "오답. ") + item.explain;
     quizExplainEl.classList.remove("hidden");
-    quizScoreEl.textContent = `점수: ${quizScore}`;
+    quizScoreEl.textContent = `점수 ${quizScore}`;
+    quizMeterFill.style.width = Math.round(((quizIndex + 1) / quizDeck.length) * 100) + "%";
     quizNextBtn.classList.remove("hidden");
     quizNextBtn.textContent = quizIndex + 1 < quizDeck.length ? "다음 문제 →" : "결과 보기";
   }
 
-  quizNextBtn.addEventListener("click", () => {
+  function quizGoNext() {
     quizIndex++;
     if (quizIndex < quizDeck.length) {
       renderQuizQuestion();
     } else {
       showQuizResult();
     }
-  });
+  }
+  quizNextBtn.addEventListener("click", quizGoNext);
 
   function showQuizResult() {
     quizPlay.classList.add("hidden");
     quizResult.classList.remove("hidden");
     const pct = Math.round((quizScore / quizDeck.length) * 100);
+
+    const donut = document.getElementById("quiz-donut");
+    donut.style.setProperty("--pct", pct);
+    document.getElementById("quiz-donut-value").textContent = pct + "%";
     document.getElementById("quiz-result-summary").textContent =
-      `${quizDeck.length}문항 중 ${quizScore}개 정답 (${pct}%)`;
+      `${quizDeck.length}문항 중 ${quizScore}개 정답`;
+    document.getElementById("quiz-result-caption").textContent =
+      pct >= 85 ? "훌륭해요! 실전 감각이 준비됐어요." :
+      pct >= 70 ? "합격권이에요. 오답 노트만 한 번 더 보세요." :
+      "취약 주제를 다시 학습하고 재도전해 보세요.";
+
+    // 주제별 정답률
+    const byTopic = {};
+    quizLog.forEach((log) => {
+      const t = log.item.topic;
+      byTopic[t] = byTopic[t] || { correct: 0, total: 0 };
+      byTopic[t].total++;
+      if (log.correct) byTopic[t].correct++;
+    });
+    const breakdownEl = document.getElementById("quiz-topic-breakdown");
+    breakdownEl.innerHTML = "";
+    Object.keys(byTopic).forEach((t) => {
+      const stat = byTopic[t];
+      const tPct = Math.round((stat.correct / stat.total) * 100);
+      const row = document.createElement("div");
+      row.className = "topic-row";
+      row.innerHTML = `
+        <span class="topic-name">${topicLabel(t)}</span>
+        <div class="meter" role="progressbar" aria-label="${topicLabel(t)} 정답률">
+          <div class="meter-fill" style="width:${tPct}%"></div>
+        </div>
+        <span class="topic-frac">${stat.correct}/${stat.total}</span>
+      `;
+      breakdownEl.appendChild(row);
+    });
+
+    // 오답 노트
     const reviewEl = document.getElementById("quiz-review");
     reviewEl.innerHTML = "";
     quizLog.forEach((log, i) => {
@@ -208,17 +359,48 @@
       div.className = "review-item " + (log.correct ? "right" : "wrong");
       const chosenText = log.item.options[log.chosen];
       const correctText = log.item.options[log.item.answer];
-      div.innerHTML = `<strong>${i + 1}. ${log.item.q}</strong><br>` +
+      div.innerHTML = `<div class="review-q">${i + 1}. ${log.item.q}</div>` +
         (log.correct
           ? `✅ 선택: ${chosenText}`
           : `❌ 선택: ${chosenText} / 정답: ${correctText}`);
       reviewEl.appendChild(div);
     });
+
+    // 틀린 문제만 다시 풀기
+    const wrongItems = quizLog.filter((l) => !l.correct).map((l) => l.item);
+    const retryBtn = document.getElementById("quiz-retry-wrong");
+    if (wrongItems.length > 0) {
+      retryBtn.textContent = `틀린 문제만 다시 풀기 (${wrongItems.length})`;
+      retryBtn.classList.remove("hidden");
+      retryBtn.onclick = () => startQuiz(wrongItems);
+    } else {
+      retryBtn.classList.add("hidden");
+    }
   }
 
   document.getElementById("quiz-restart").addEventListener("click", () => {
     quizResult.classList.add("hidden");
     quizSetup.classList.remove("hidden");
+  });
+
+  // ---------- 키보드 단축키 ----------
+  document.addEventListener("keydown", (e) => {
+    if (isTypingTarget(e.target)) return;
+
+    if (activeTab === "flashcards") {
+      if (e.key === "ArrowRight") { document.getElementById("fc-next").click(); }
+      else if (e.key === "ArrowLeft") { document.getElementById("fc-prev").click(); }
+      else if (e.key === " " || e.key === "Enter") { e.preventDefault(); fcCard.classList.toggle("flipped"); }
+    } else if (activeTab === "quiz") {
+      if (!quizPlay.classList.contains("hidden")) {
+        if (!quizAnswered && OPT_KEYS.includes(e.key)) {
+          selectAnswer(OPT_KEYS.indexOf(e.key));
+        } else if (quizAnswered && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          quizGoNext();
+        }
+      }
+    }
   });
 
   // ---------- 진행 상황(체크리스트) ----------
@@ -238,22 +420,43 @@
   function renderProgress() {
     const data = loadProgress();
     const container = document.getElementById("progress-days");
+    const overviewEl = document.getElementById("day-overview");
     container.innerHTML = "";
+    overviewEl.innerHTML = "";
     let totalItems = 0;
     let checkedItems = 0;
 
     PLAN_DAYS.forEach((day) => {
+      const dayChecked = day.items.filter((_, idx) => data[`${day.day}-${idx}`]).length;
+      totalItems += day.items.length;
+      checkedItems += dayChecked;
+      const dayPct = Math.round((dayChecked / day.items.length) * 100);
+
+      // 상단 10일 미니 오버뷰
+      const chip = document.createElement("div");
+      chip.className = "day-chip";
+      chip.title = `Day ${day.day}: ${dayChecked}/${day.items.length}`;
+      chip.innerHTML = `<div class="day-chip-fill" style="height:${dayPct}%"></div><span>${day.day}</span>`;
+      overviewEl.appendChild(chip);
+
+      // 일차 카드
       const card = document.createElement("div");
       card.className = "day-card";
-      const h3 = document.createElement("h3");
-      h3.textContent = `Day ${day.day} · ${day.title}`;
-      card.appendChild(h3);
+
+      const head = document.createElement("div");
+      head.className = "day-card-head";
+      head.innerHTML = `
+        <h3>Day ${day.day} · ${day.title}</h3>
+        <div class="meter-row" style="margin-bottom:0;">
+          <div class="meter" role="progressbar" aria-label="Day ${day.day} 진행률"><div class="meter-fill" style="width:${dayPct}%"></div></div>
+          <span class="meter-label">${dayChecked}/${day.items.length}</span>
+        </div>
+      `;
+      card.appendChild(head);
 
       day.items.forEach((itemText, idx) => {
-        totalItems++;
         const itemKey = `${day.day}-${idx}`;
         const checked = !!data[itemKey];
-        if (checked) checkedItems++;
 
         const label = document.createElement("label");
         if (checked) label.classList.add("checked");
@@ -274,9 +477,11 @@
       container.appendChild(card);
     });
 
-    const summary = document.getElementById("progress-summary");
     const pct = totalItems ? Math.round((checkedItems / totalItems) * 100) : 0;
-    summary.textContent = `전체 진행률: ${checkedItems} / ${totalItems} (${pct}%)`;
+    document.getElementById("progress-summary").textContent = `${checkedItems} / ${totalItems} 완료`;
+    const donut = document.getElementById("progress-donut");
+    donut.style.setProperty("--pct", pct);
+    document.getElementById("progress-donut-value").textContent = pct + "%";
   }
 
   renderProgress();
