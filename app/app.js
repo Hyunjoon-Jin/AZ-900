@@ -6,6 +6,7 @@
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const CHECK_ICON = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4 10-10"/></svg>';
   const CROSS_ICON = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  const EXTERNAL_LINK_ICON = '<svg class="icon icon-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>';
 
   // ---------- 테마 토글 ----------
   const THEME_KEY = "az900-theme-v1";
@@ -95,6 +96,13 @@
     let s = escapeHtml(text);
     s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
+      const safeUrl = url.replace(/"/g, "%22");
+      if (/^https?:\/\//.test(safeUrl)) {
+        return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="md-link md-link-external">${label}${EXTERNAL_LINK_ICON}</a>`;
+      }
+      return `<a href="${safeUrl}" class="md-link">${label}</a>`;
+    });
     return s;
   }
 
@@ -155,6 +163,7 @@
 
   const SUMMARY_HEADING_RE = /^핵심\s*요약/;
   const PITFALL_HEADING_RE = /^시험에\s*자주\s*나오는\s*함정/;
+  const PART_HEADING_RE = /^Part\s+([123])\./;
 
   function renderMarkdown(md) {
     const lines = md.replace(/\r\n/g, "\n").split("\n");
@@ -215,6 +224,8 @@
         const text = h[2];
         const id = makeId(text);
         let prefix = "";
+        let headingClass = "";
+        const partMatch = level === 1 ? PART_HEADING_RE.exec(text) : null;
         if (level === 3 && SUMMARY_HEADING_RE.test(text)) {
           html += '<div class="md-callout md-callout-summary">';
           calloutOpen = true;
@@ -223,8 +234,10 @@
           html += '<div class="md-callout md-callout-pitfall">';
           calloutOpen = true;
           prefix = CROSS_ICON;
+        } else if (partMatch) {
+          headingClass = ` class="part-heading part-domain-${partMatch[1]}"`;
         }
-        html += `<h${level} id="${id}">${prefix}${mdInline(text)}</h${level}>`;
+        html += `<h${level} id="${id}"${headingClass}>${prefix}${mdInline(text)}</h${level}>`;
         if (level <= 2) toc.push({ level, id, text });
         i++;
         continue;
@@ -364,6 +377,19 @@
       const target = document.getElementById(link.dataset.tocTarget);
       if (target) target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
       materialsToc.removeAttribute("open");
+    });
+  }
+
+  const materialsBodyEl = document.getElementById("materials-body");
+  if (materialsBodyEl) {
+    materialsBodyEl.addEventListener("click", (e) => {
+      const link = e.target.closest('a.md-link[href^="#"]');
+      if (!link) return;
+      const targetId = link.getAttribute("href").slice(1);
+      const target = document.getElementById(targetId);
+      if (!target) return;
+      e.preventDefault();
+      target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
     });
   }
 

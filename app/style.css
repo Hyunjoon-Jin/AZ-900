@@ -949,6 +949,28 @@ button {
 .markdown-view h4 { font-size: 0.95rem; margin: 1.1rem 0 0.5rem; color: var(--text-secondary); }
 .markdown-view p { margin: 0 0 0.9rem; color: var(--text-secondary); }
 .markdown-view strong { color: var(--text-primary); font-weight: 600; }
+.markdown-view h1.part-heading {
+  border-top: 4px solid var(--domain-color, var(--border));
+  padding-top: 1.4rem;
+  margin-top: 2.4rem;
+}
+.markdown-view h1.part-heading:first-child { margin-top: 0; }
+.markdown-view h1.part-domain-1 { --domain-color: var(--domain-1); }
+.markdown-view h1.part-domain-2 { --domain-color: var(--domain-2); }
+.markdown-view h1.part-domain-3 { --domain-color: var(--domain-3); }
+.markdown-view .md-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  text-underline-offset: 2px;
+}
+.markdown-view .md-link:hover { text-decoration-color: var(--accent); }
+.markdown-view .md-link-external .icon-external {
+  width: 12px;
+  height: 12px;
+  margin-left: 2px;
+  vertical-align: -1px;
+}
 .markdown-view code {
   background: color-mix(in srgb, var(--text-muted) 15%, transparent);
   border-radius: 4px;
