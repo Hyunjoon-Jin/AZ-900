@@ -48,10 +48,18 @@
     tabIndicator.style.transform = `translate(${btnRect.left - parentRect.left}px, ${btnRect.top - parentRect.top}px)`;
   }
 
+  // fade-in 애니메이션이 끝나면 남아있는 transform을 제거해, 그 안의 position:fixed 요소가
+  // 패널이 아닌 뷰포트 기준으로 고정되도록 되돌린다(최초 활성 탭 포함 모든 패널에 적용).
+  tabPanels.forEach((panel) => {
+    panel.addEventListener("animationend", (e) => {
+      if (e.target === panel) panel.classList.add("anim-settled");
+    });
+  });
+
   tabButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
       tabButtons.forEach((b) => { b.classList.remove("active"); b.setAttribute("aria-selected", "false"); });
-      tabPanels.forEach((p) => p.classList.remove("active"));
+      tabPanels.forEach((p) => { p.classList.remove("active"); p.classList.remove("anim-settled"); });
       btn.classList.add("active");
       btn.setAttribute("aria-selected", "true");
       activeTab = btn.dataset.tab;
@@ -65,6 +73,11 @@
       renderNextStepBar();
       const fab = document.getElementById("materials-back-to-top");
       if (fab && activeTab !== "materials") fab.hidden = true;
+      if (activeTab !== "materials") {
+        const tocFab = document.getElementById("materials-toc-fab");
+        if (tocFab) tocFab.hidden = true;
+        closeTocFloat();
+      }
     });
   });
   window.addEventListener("resize", () => {
@@ -507,21 +520,14 @@
   const materialsTocList = document.getElementById("materials-toc-list");
   const materialsTocCount = document.getElementById("materials-toc-count");
   const materialsReadProgress = document.getElementById("materials-read-progress");
+  const materialsTocFab = document.getElementById("materials-toc-fab");
+  const materialsTocFloat = document.getElementById("materials-toc-float");
+  const materialsTocFloatList = document.getElementById("materials-toc-float-list");
 
-  function renderMaterialsToc(toc) {
-    if (!materialsToc) return;
-    materialsToc.removeAttribute("open");
-    if (!toc || toc.length === 0) {
-      materialsToc.hidden = true;
-      materialsTocList.innerHTML = "";
-      if (materialsReadProgress) materialsReadProgress.textContent = "";
-      return;
-    }
-    materialsToc.hidden = false;
-    materialsTocCount.textContent = `(${toc.length})`;
+  // 목차 항목 리스트 마크업 — 인라인 목차와 하단 플로팅 패널이 동일한 로직을 공유한다.
+  function buildTocListHtml(toc) {
     let html = "";
     let h2Open = false;
-    const chapters = toc.filter((entry) => entry.level === 2);
     toc.forEach((entry) => {
       if (entry.level === 1) {
         if (h2Open) { html += "</ul>"; h2Open = false; }
@@ -533,7 +539,36 @@
       }
     });
     if (h2Open) html += "</ul>";
-    materialsTocList.innerHTML = html;
+    return html;
+  }
+
+  let materialsHasToc = false;
+
+  function closeTocFloat() {
+    materialsTocFloat.classList.add("hidden");
+    materialsTocFab.classList.remove("open");
+  }
+
+  function renderMaterialsToc(toc) {
+    if (!materialsToc) return;
+    materialsToc.removeAttribute("open");
+    closeTocFloat();
+    if (!toc || toc.length === 0) {
+      materialsHasToc = false;
+      materialsToc.hidden = true;
+      materialsTocList.innerHTML = "";
+      materialsTocFloatList.innerHTML = "";
+      materialsTocFab.hidden = true;
+      if (materialsReadProgress) materialsReadProgress.textContent = "";
+      return;
+    }
+    materialsHasToc = true;
+    materialsToc.hidden = false;
+    materialsTocCount.textContent = `(${toc.length})`;
+    const listHtml = buildTocListHtml(toc);
+    materialsTocList.innerHTML = listHtml;
+    materialsTocFloatList.innerHTML = listHtml;
+    const chapters = toc.filter((entry) => entry.level === 2);
     if (materialsReadProgress) {
       materialsReadProgress.textContent = chapters.length
         ? `· ${chapters.filter((c) => readChapters.has(c.id)).length}/${chapters.length} 챕터 읽음`
@@ -548,6 +583,31 @@
       e.preventDefault();
       scrollToId(link.dataset.tocTarget);
       materialsToc.removeAttribute("open");
+    });
+  }
+
+  // 교재를 읽는 중에도 다른 챕터로 바로 이동할 수 있는 플로팅 목차 버튼.
+  if (materialsTocFab) {
+    materialsTocFab.addEventListener("click", () => {
+      const willOpen = materialsTocFloat.classList.contains("hidden");
+      if (willOpen) {
+        materialsTocFloat.classList.remove("hidden");
+        materialsTocFab.classList.add("open");
+      } else {
+        closeTocFloat();
+      }
+    });
+    materialsTocFloatList.addEventListener("click", (e) => {
+      const link = e.target.closest("a[data-toc-target]");
+      if (!link) return;
+      e.preventDefault();
+      scrollToId(link.dataset.tocTarget);
+      closeTocFloat();
+    });
+    document.addEventListener("click", (e) => {
+      if (materialsTocFloat.classList.contains("hidden")) return;
+      if (materialsTocFloat.contains(e.target) || materialsTocFab.contains(e.target)) return;
+      closeTocFloat();
     });
   }
 
@@ -707,7 +767,13 @@
       if (scrollTicking) return;
       scrollTicking = true;
       requestAnimationFrame(() => {
-        backToTopBtn.hidden = !(activeTab === "materials" && window.scrollY > 480);
+        const showFabs = activeTab === "materials" && window.scrollY > 480;
+        backToTopBtn.hidden = !showFabs;
+        if (materialsTocFab) {
+          const showTocFab = showFabs && materialsHasToc;
+          materialsTocFab.hidden = !showTocFab;
+          if (!showTocFab) closeTocFloat();
+        }
         scrollTicking = false;
       });
     });
@@ -2117,6 +2183,8 @@
       <span class="next-step-text">🧭 ${step.text}</span>
       <button class="btn-sm" type="button" data-goto-tab="${step.tab}"${topicAttr}>${step.label}</button>
     `;
+    // 안내 바 내용에 따라 sticky 헤더 전체 높이가 바뀌므로(줄바꿈 등), 매번 오프셋을 다시 잰다.
+    syncStickyOffset();
   }
 
   renderProgress();
