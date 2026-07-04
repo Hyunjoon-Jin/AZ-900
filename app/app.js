@@ -505,7 +505,10 @@
       const idx = chapterIndexOf[chId];
       const prev = idx > 0 ? chapters[idx - 1] : null;
       const next = idx < chapters.length - 1 ? chapters[idx + 1] : null;
+      // 챕터 상단뿐 아니라 다 읽고 난 하단에서도 바로 읽음 표시를 할 수 있게 동일한 토글을 하나 더 둔다.
+      const bottomReadToggle = `<button class="chapter-read-toggle chapter-read-toggle-bottom" type="button" data-chapter-id="${chId}" aria-pressed="false"><span class="chapter-read-check">${CHECK_ICON}</span><span class="chapter-read-label">읽음으로 표시</span></button>`;
       return (
+        bottomReadToggle +
         '<nav class="chapter-nav" aria-label="챕터 이동">' +
         `<button class="chapter-nav-btn chapter-nav-prev" type="button"${prev ? ` data-toc-target="${prev.id}"` : " disabled"}>← 이전${prev ? ": " + mdInline(prev.text) : ""}</button>` +
         `<button class="chapter-nav-btn chapter-nav-next" type="button"${next ? ` data-toc-target="${next.id}"` : " disabled"}>다음${next ? ": " + mdInline(next.text) : ""} →</button>` +
@@ -642,10 +645,10 @@
         const cached = materialsCache[currentMaterialsDoc];
         if (cached) renderMaterialsToc(cached.toc);
         if (!wasRead && CHAPTER_TOPIC[id]) {
-          showChapterQuickCheckBanner(chapterBtn, id);
+          showChapterQuickCheckBanner(id);
         } else if (wasRead) {
           // 다시 안읽음으로 표시하면 그 챕터용 배너도 함께 지운다(더 이상 맥락에 안 맞으므로).
-          const h2 = chapterBtn.closest("h2");
+          const h2 = document.getElementById(id);
           const existingBanner = h2 && h2.nextElementSibling;
           if (existingBanner && existingBanner.classList && existingBanner.classList.contains("chapter-quickcheck")) {
             existingBanner.remove();
@@ -687,9 +690,9 @@
   const QUICK_CHECK_SIZE = 5;
 
   // 챕터를 읽음으로 표시하면 그 챕터가 속한 주제에서 무작위 5문항을 뽑아 바로 확인할 수 있도록 배너를 띄운다.
-  function showChapterQuickCheckBanner(chapterBtn, chapterId) {
+  function showChapterQuickCheckBanner(chapterId) {
     const topicKey = CHAPTER_TOPIC[chapterId];
-    const h2 = chapterBtn.closest("h2");
+    const h2 = document.getElementById(chapterId);
     if (!h2) return;
     const existing = h2.nextElementSibling;
     if (existing && existing.classList && existing.classList.contains("chapter-quickcheck")) existing.remove();
@@ -1977,14 +1980,57 @@
     return { action: "quiz", label: "퀴즈로", text: "퀴즈로 실전 감각을 점검해보세요" };
   }
 
-  function renderLearningAnalysis(quizHistory) {
+  // 주제별 누적 정답률을 모의고사와 동일한 1000점 환산 방식으로 합산한 전체 예상 준비도.
+  function computeOverallReadiness(quizHistory) {
+    let correct = 0;
+    let total = 0;
+    Object.values(quizHistory).forEach((entry) => {
+      correct += entry.correct;
+      total += entry.total;
+    });
+    if (total === 0) return null;
+    return {
+      correct,
+      total,
+      pct: Math.round((correct / total) * 100),
+      scaledScore: Math.round((correct / total) * 1000),
+    };
+  }
+
+  // 실제 시험의 3개 도메인 기준으로 주제별 누적 통계를 묶어서 보여준다(모의고사와 동일한 도메인 구분).
+  function computeDomainBreakdown(quizHistory) {
+    const byDomain = {};
+    TOPICS.forEach((topic) => {
+      const entry = quizHistory[topic.key];
+      if (!entry) return;
+      byDomain[topic.domain] = byDomain[topic.domain] || { correct: 0, total: 0 };
+      byDomain[topic.domain].correct += entry.correct;
+      byDomain[topic.domain].total += entry.total;
+    });
+    return byDomain;
+  }
+
+  // 그 주제만 다룬(전체/모의고사가 아닌) 최근 두 회차를 비교해 상승/하락/유지 추이를 계산.
+  function computeTopicTrend(topicKey, sessionLog) {
+    const entries = sessionLog.filter((s) => s.topic === topicKey);
+    if (entries.length < 2) return null;
+    const [latest, previous] = entries;
+    if (latest.pct > previous.pct) return "up";
+    if (latest.pct < previous.pct) return "down";
+    return "same";
+  }
+
+  const TREND_ICON = { up: "▲", down: "▼", same: "―" };
+
+  function renderLearningAnalysis(quizHistory, sessionLog) {
     const container = document.getElementById("learning-analysis");
     if (!container) return;
 
     const rows = TOPICS.map((topic) => {
       const stats = computeTopicStats(topic, quizHistory);
       const status = classifyTopicStatus(stats.quizPct);
-      return { topic, stats, status };
+      const trend = computeTopicTrend(topic.key, sessionLog);
+      return { topic, stats, status, trend };
     });
 
     const counts = { strong: 0, average: 0, weak: 0, untested: 0 };
@@ -1999,6 +2045,38 @@
 
     const strengths = rows.filter((r) => r.status === "strong").map((r) => r.topic.label);
 
+    const readiness = computeOverallReadiness(quizHistory);
+    const readinessHtml = readiness
+      ? `<p class="analysis-readiness"><strong>${readiness.scaledScore}점</strong> / 1000점 <span class="analysis-readiness-sub">(누적 ${readiness.correct}/${readiness.total}문항 · ${readiness.pct}%) — 연습 문제 기준 예상 준비도</span></p>`
+      : `<p class="analysis-readiness analysis-empty">아직 퀴즈 기록이 없어요. 몇 문제라도 풀어보면 예상 준비도가 표시돼요.</p>`;
+
+    const byDomain = computeDomainBreakdown(quizHistory);
+    const domainRowsHtml = [1, 2, 3]
+      .filter((d) => byDomain[d])
+      .map((d) => {
+        const stat = byDomain[d];
+        const pct = Math.round((stat.correct / stat.total) * 100);
+        return `
+          <div class="topic-row">
+            <span class="topic-name">${dotHtml(domainColor(d))}${DOMAIN_LABELS[d]}</span>
+            <div class="meter" role="progressbar" aria-label="${DOMAIN_LABELS[d]} 정답률">
+              <div class="meter-fill" style="width:${pct}%"></div>
+            </div>
+            <span class="topic-frac">${stat.correct}/${stat.total}</span>
+          </div>
+        `;
+      })
+      .join("");
+    const domainHtml = domainRowsHtml
+      ? `<h4 class="analysis-subtitle">도메인별 준비도 (실제 시험 출제 비중 기준)</h4><div class="topic-breakdown">${domainRowsHtml}</div>`
+      : "";
+
+    const wrongCount = Object.keys(loadWrongTracker()).length;
+    const wrongHtml =
+      wrongCount > 0
+        ? `<div class="analysis-wrong-summary">📌 아직 극복하지 못한 문제 ${wrongCount}개 <button class="btn-sm" type="button" data-goto-tab="quiz">퀴즈에서 복습하기</button></div>`
+        : "";
+
     const summaryHtml = `<p class="analysis-summary">강점 ${counts.strong} · 보통 ${counts.average} · 약점 ${counts.weak} · 미응시 ${counts.untested}</p>`;
     const strengthsHtml = strengths.length
       ? `<p class="analysis-strengths">💪 강점 주제: ${strengths.join(", ")}</p>`
@@ -2010,11 +2088,14 @@
             const rec = recommendAction(r.stats.readPct, r.stats.fcPct);
             const badgeLabel = r.status === "weak" ? "약점" : "미응시";
             const pctLabel = r.stats.quizPct === null ? "테스트 기록 없음" : `퀴즈 ${r.stats.quizPct}%`;
+            const trendHtml = r.trend
+              ? `<span class="analysis-trend analysis-trend-${r.trend}">${TREND_ICON[r.trend]}</span>`
+              : "";
             return `
               <div class="analysis-row">
                 <span class="analysis-topic">${dotHtml(domainColor(r.topic.domain))}${r.topic.label}</span>
                 <span class="analysis-badge analysis-badge-${r.status}">${badgeLabel}</span>
-                <span class="analysis-pct">${pctLabel}</span>
+                <span class="analysis-pct">${pctLabel}${trendHtml}</span>
                 <span class="analysis-rec-text">${rec.text}</span>
                 <button class="btn-sm" type="button" data-goto-tab="${rec.action}" data-goto-topic="${r.topic.key}">${rec.label}</button>
               </div>
@@ -2023,7 +2104,7 @@
           .join("")
       : `<p class="analysis-empty">모든 주제가 양호해요. 꾸준히 복습만 이어가면 됩니다 🎉</p>`;
 
-    container.innerHTML = summaryHtml + strengthsHtml + rowsHtml;
+    container.innerHTML = readinessHtml + domainHtml + wrongHtml + summaryHtml + strengthsHtml + rowsHtml;
   }
 
   function sessionModeLabel(mode) {
@@ -2059,7 +2140,7 @@
 
   function renderProgress() {
     const quizHistory = loadQuizHistory();
-    renderLearningAnalysis(quizHistory);
+    renderLearningAnalysis(quizHistory, loadSessionLog());
     renderTopicMastery(quizHistory);
     renderSessionLog();
     const data = loadProgress();
