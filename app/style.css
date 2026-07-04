@@ -1126,6 +1126,64 @@ button {
 .materials-fab:hover { color: var(--accent); border-color: var(--accent); }
 .materials-fab[hidden] { display: none; }
 
+/* ---------- 학습 교재 다이어그램 ---------- */
+.markdown-view .md-diagram {
+  margin: 0 0 1.2rem;
+  padding: 1.1rem 1rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.markdown-view .md-diagram-svg {
+  overflow-x: auto;
+}
+.markdown-view .md-diagram-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 420px;
+  max-width: 560px;
+  margin: 0 auto;
+  font-family: inherit;
+}
+.markdown-view .md-diagram figcaption {
+  margin-top: 0.7rem;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.markdown-view .md-diagram-missing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1.4rem 1rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--critical);
+  min-width: 0;
+}
+.markdown-view .md-diagram-missing .icon { width: 22px; height: 22px; }
+.markdown-view .md-diagram-missing p { margin: 0; font-size: 0.85rem; }
+
+/* 다이어그램 내부 테마 유틸리티 클래스 (SVG는 innerHTML로 삽입되어 전역 스타일시트를 그대로 상속) */
+.markdown-view .md-diagram-svg .dg-surface     { fill: var(--surface-raised); }
+.markdown-view .md-diagram-svg .dg-surface-alt { fill: var(--surface); }
+.markdown-view .md-diagram-svg .dg-border      { stroke: var(--border-strong); fill: none; }
+.markdown-view .md-diagram-svg .dg-border-soft { stroke: var(--border); fill: none; }
+.markdown-view .md-diagram-svg .dg-accent      { stroke: var(--accent); fill: none; }
+.markdown-view .md-diagram-svg .dg-accent-fill { fill: var(--accent); }
+.markdown-view .md-diagram-svg .dg-on-accent   { fill: #fff; }
+.markdown-view .md-diagram-svg .dg-good        { fill: var(--good); }
+.markdown-view .md-diagram-svg .dg-critical    { fill: var(--critical); stroke: var(--critical); }
+.markdown-view .md-diagram-svg .dg-domain-1    { fill: var(--domain-1); }
+.markdown-view .md-diagram-svg .dg-domain-2    { fill: var(--domain-2); }
+.markdown-view .md-diagram-svg .dg-domain-3    { fill: var(--domain-3); }
+.markdown-view .md-diagram-svg .dg-text        { fill: var(--text-primary); font-weight: 600; }
+.markdown-view .md-diagram-svg .dg-text-sec    { fill: var(--text-secondary); }
+.markdown-view .md-diagram-svg .dg-text-muted  { fill: var(--text-muted); }
+
 /* ---------- Confetti ---------- */
 .confetti-piece {
   position: fixed;
@@ -1149,4 +1207,5 @@ button {
   .day-overview { grid-template-columns: repeat(5, 1fr); }
   .result-hero { flex-direction: column; text-align: center; }
   .topic-row .topic-name { width: 100px; }
+  .markdown-view .md-diagram { padding: 0.85rem 0.7rem 0.75rem; }
 }

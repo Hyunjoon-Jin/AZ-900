@@ -126,7 +126,30 @@
       /^>\s?/.test(line) ||
       /^\s*\|/.test(line) ||
       /^\s*[-*]\s+/.test(line) ||
-      /^\s*\d+\.\s+/.test(line)
+      /^\s*\d+\.\s+/.test(line) ||
+      /^```diagram:/.test(line)
+    );
+  }
+
+  const DIAGRAM_OPEN_RE = /^```diagram:([a-z][a-z0-9-]*)\s*$/;
+
+  function renderDiagramFigure(diagramId, caption) {
+    const svgMarkup = typeof DIAGRAMS !== "undefined" ? DIAGRAMS[diagramId] : undefined;
+    const captionHtml = caption ? `<figcaption>${mdInline(caption)}</figcaption>` : "";
+    if (svgMarkup) {
+      return (
+        `<figure class="md-diagram" data-diagram-id="${diagramId}">` +
+        `<div class="md-diagram-svg">${svgMarkup}</div>` +
+        captionHtml +
+        "</figure>"
+      );
+    }
+    console.warn("[diagrams] unknown diagram id:", diagramId);
+    return (
+      `<figure class="md-diagram" data-diagram-id="${diagramId}">` +
+      `<div class="md-diagram-svg md-diagram-missing">${CROSS_ICON}<p>다이어그램을 표시할 수 없습니다 (id: ${escapeHtml(diagramId)})</p></div>` +
+      captionHtml +
+      "</figure>"
     );
   }
 
@@ -223,6 +246,22 @@
           i++;
         }
         html += `<blockquote>${mdInline(quoteLines.join(" "))}</blockquote>`;
+        continue;
+      }
+
+      const dg = line.match(DIAGRAM_OPEN_RE);
+      if (dg) {
+        flushList();
+        closeCallout();
+        const diagramId = dg[1];
+        i++;
+        const captionLines = [];
+        while (i < lines.length && lines[i].trim() !== "```") {
+          captionLines.push(lines[i].trim());
+          i++;
+        }
+        if (i < lines.length) i++; // 닫는 ``` 소비
+        html += renderDiagramFigure(diagramId, captionLines.join(" ").trim());
         continue;
       }
 
