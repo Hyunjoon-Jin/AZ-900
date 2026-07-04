@@ -1086,6 +1086,51 @@ button {
 .markdown-view .chapter-nav-next { text-align: right; }
 .markdown-view .chapter-nav-btn:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
 .markdown-view .chapter-nav-btn[disabled] { opacity: 0.35; cursor: default; }
+
+.glossary-term {
+  position: relative;
+  border-bottom: 1px dotted var(--text-muted);
+  cursor: help;
+}
+.glossary-term .glossary-tip {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(280px, calc(100vw - 2.5rem));
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
+  color: var(--page);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  box-shadow: var(--shadow-md);
+  z-index: 20;
+  cursor: text;
+}
+.glossary-term .glossary-tip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--text-primary);
+}
+.glossary-term:hover .glossary-tip,
+.glossary-term:focus .glossary-tip,
+.glossary-term.tip-open .glossary-tip {
+  display: block;
+}
+@media (max-width: 480px) {
+  .glossary-term .glossary-tip { left: 0; transform: none; }
+  .glossary-term .glossary-tip::after { left: 1rem; transform: none; }
+}
 .markdown-view h3 { font-size: 1.05rem; margin: 1.4rem 0 0.6rem; }
 .markdown-view h4 { font-size: 0.95rem; margin: 1.1rem 0 0.5rem; color: var(--text-secondary); }
 .markdown-view p { margin: 0 0 0.9rem; color: var(--text-secondary); }

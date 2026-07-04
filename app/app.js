@@ -83,6 +83,15 @@
     if (btn) btn.click();
   });
 
+  // 용어 툴팁: 데스크톱은 :hover/:focus로 자동 표시되지만, 모바일은 hover가 없어 탭으로 토글해야 한다.
+  document.addEventListener("click", (e) => {
+    const term = e.target.closest(".glossary-term");
+    document.querySelectorAll(".glossary-term.tip-open").forEach((el) => {
+      if (el !== term) el.classList.remove("tip-open");
+    });
+    if (term) term.classList.toggle("tip-open");
+  });
+
   // 플래시카드/퀴즈/학습 자료 탭으로 "문맥 있게" 이동한다 (필터링까지만, 실행은 사용자가 직접).
   function applyTopicJump(tab, topic) {
     if (!topic) return;
@@ -144,6 +153,47 @@
       return `<a href="${safeUrl}" class="md-link">${label}</a>`;
     });
     return s;
+  }
+
+  // ---------- 용어 설명 호버/탭 툴팁 ----------
+  function escapeRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  const GLOSSARY_TERMS = typeof GLOSSARY !== "undefined" ? Object.keys(GLOSSARY).sort((a, b) => b.length - a.length) : [];
+  const GLOSSARY_RE = GLOSSARY_TERMS.length ? new RegExp(GLOSSARY_TERMS.map(escapeRegex).join("|"), "g") : null;
+
+  // 텍스트 조각 안에서 용어를 찾아 툴팁 스팬으로 감싼다. seen에 이미 있는 용어(같은 챕터에서 재등장)는 건너뛴다.
+  function wrapGlossaryText(text, seen) {
+    if (!GLOSSARY_RE) return text;
+    GLOSSARY_RE.lastIndex = 0;
+    return text.replace(GLOSSARY_RE, (term) => {
+      if (seen.has(term)) return term;
+      seen.add(term);
+      return `<span class="glossary-term" tabindex="0">${term}<span class="glossary-tip" role="tooltip">${escapeHtml(GLOSSARY[term])}</span></span>`;
+    });
+  }
+
+  // mdInline이 만든 HTML에서 태그(특히 a/code) 내부는 건드리지 않고 순수 텍스트 구간에만 용어를 감싼다.
+  function wrapGlossaryHtml(html, seen) {
+    if (!GLOSSARY_RE) return html;
+    const parts = html.split(/(<[^>]+>)/);
+    let skipDepth = 0;
+    for (let idx = 0; idx < parts.length; idx++) {
+      const part = parts[idx];
+      if (part.startsWith("<")) {
+        if (/^<(a|code)\b/i.test(part)) skipDepth++;
+        else if (/^<\/(a|code)>/i.test(part)) skipDepth = Math.max(0, skipDepth - 1);
+        continue;
+      }
+      if (skipDepth > 0 || !part) continue;
+      parts[idx] = wrapGlossaryText(part, seen);
+    }
+    return parts.join("");
+  }
+
+  // 본문(문단/목록/표/인용문)에서만 mdInline 결과에 용어 툴팁을 덧입힌다. 제목/목차/챕터 이동 버튼에는 적용하지 않는다.
+  function mdInlineBody(text, seen) {
+    return wrapGlossaryHtml(mdInline(text), seen);
   }
 
   function slugify(text) {
@@ -212,6 +262,7 @@
     let listBuffer = null;
     let calloutOpen = false;
     let openChapterId = null;
+    let chapterGlossarySeen = new Set();
     const usedIds = Object.create(null);
     const toc = [];
 
@@ -282,6 +333,7 @@
           html += `<!--CHAPTER_NAV:${openChapterId}-->`;
           openChapterId = null;
         }
+        if (level === 1 || level === 2) chapterGlossarySeen = new Set();
         if (level === 2) openChapterId = id;
         const readToggle =
           level === 2
@@ -308,7 +360,7 @@
           quoteLines.push(lines[i].replace(/^>\s?/, ""));
           i++;
         }
-        html += `<blockquote>${mdInline(quoteLines.join(" "))}</blockquote>`;
+        html += `<blockquote>${mdInlineBody(quoteLines.join(" "), chapterGlossarySeen)}</blockquote>`;
         continue;
       }
 
@@ -341,7 +393,7 @@
           '<div class="md-table-wrap"><table><thead><tr>' +
           headerCells.map((c) => `<th>${mdInline(c)}</th>`).join("") +
           "</tr></thead><tbody>" +
-          rows.map((r) => "<tr>" + r.map((c) => `<td>${mdInline(c)}</td>`).join("") + "</tr>").join("") +
+          rows.map((r) => "<tr>" + r.map((c) => `<td>${mdInlineBody(c, chapterGlossarySeen)}</td>`).join("") + "</tr>").join("") +
           "</tbody></table></div>";
         continue;
       }
@@ -359,7 +411,7 @@
           ul[1] !== undefined
             ? `<span class="md-checkbox${ul[1].toLowerCase() === "x" ? " checked" : ""}"></span>`
             : "";
-        listBuffer.items.push(checkbox + mdInline(text));
+        listBuffer.items.push(checkbox + mdInlineBody(text, chapterGlossarySeen));
         continue;
       }
 
@@ -372,7 +424,7 @@
         i++;
         const continuation = consumeContinuation();
         const text = [ol[1]].concat(continuation).join(" ");
-        listBuffer.items.push(mdInline(text));
+        listBuffer.items.push(mdInlineBody(text, chapterGlossarySeen));
         continue;
       }
 
@@ -383,7 +435,7 @@
         paraLines.push(lines[i]);
         i++;
       }
-      html += `<p>${mdInline(paraLines.join(" "))}</p>`;
+      html += `<p>${mdInlineBody(paraLines.join(" "), chapterGlossarySeen)}</p>`;
     }
     flushList();
     closeCallout();
