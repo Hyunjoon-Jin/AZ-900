@@ -174,11 +174,14 @@
   }
   let readChapters = loadReadChapters();
 
-  // 챕터 id -> 주제 키 역매핑 (study-guide.md 챕터만 포함, study-plan.md 챕터는 매핑되지 않음).
+  // 챕터 id -> 주제 키 / 정확한 헤딩 텍스트 역매핑 (study-guide.md 챕터만 포함, study-plan.md 챕터는 매핑되지 않음).
   const CHAPTER_TOPIC = Object.create(null);
+  const CHAPTER_HEADING = Object.create(null);
   Object.keys(STUDY_GUIDE_CHAPTERS).forEach((topicKey) => {
     STUDY_GUIDE_CHAPTERS[topicKey].forEach((heading) => {
-      CHAPTER_TOPIC["sec-" + slugify(heading)] = topicKey;
+      const chapterId = "sec-" + slugify(heading);
+      CHAPTER_TOPIC[chapterId] = topicKey;
+      CHAPTER_HEADING[chapterId] = heading;
     });
   });
 
@@ -658,8 +661,7 @@
       }
       const quickTestBtn = e.target.closest(".chapter-quick-test");
       if (quickTestBtn) {
-        const topicKey = CHAPTER_TOPIC[quickTestBtn.dataset.chapterId];
-        if (topicKey) startQuickCheckQuiz(topicKey);
+        startQuickCheckQuiz(quickTestBtn.dataset.chapterId);
         return;
       }
       const navBtn = e.target.closest(".chapter-nav-btn[data-toc-target]");
@@ -670,9 +672,9 @@
       const qcStart = e.target.closest(".chapter-quickcheck-start");
       if (qcStart) {
         const banner = qcStart.closest(".chapter-quickcheck");
-        const topicKey = banner.dataset.topic;
+        const chapterId = banner.dataset.chapterId;
         banner.remove();
-        startQuickCheckQuiz(topicKey);
+        startQuickCheckQuiz(chapterId);
         return;
       }
       const qcDismiss = e.target.closest(".chapter-quickcheck-dismiss");
@@ -689,18 +691,21 @@
 
   const QUICK_CHECK_SIZE = 5;
 
-  // 챕터를 읽음으로 표시하면 그 챕터가 속한 주제에서 무작위 5문항을 뽑아 바로 확인할 수 있도록 배너를 띄운다.
+  // 챕터를 읽음으로 표시하면 그 챕터에 해당하는 문제만 모아 무작위로 뽑아 바로 확인할 수 있도록 배너를 띄운다.
   function showChapterQuickCheckBanner(chapterId) {
-    const topicKey = CHAPTER_TOPIC[chapterId];
+    const heading = CHAPTER_HEADING[chapterId];
     const h2 = document.getElementById(chapterId);
-    if (!h2) return;
+    if (!h2 || !heading) return;
+    const poolSize = QUIZ.filter((q) => q.chapter === heading).length;
+    if (poolSize === 0) return;
     const existing = h2.nextElementSibling;
     if (existing && existing.classList && existing.classList.contains("chapter-quickcheck")) existing.remove();
+    const quizCount = Math.min(QUICK_CHECK_SIZE, poolSize);
     const banner = document.createElement("div");
     banner.className = "chapter-quickcheck";
-    banner.dataset.topic = topicKey;
+    banner.dataset.chapterId = chapterId;
     banner.innerHTML = `
-      <p>🎯 <strong>${topicLabel(topicKey)}</strong> 챕터를 읽으셨네요! ${QUICK_CHECK_SIZE}문항으로 간단히 확인해볼까요?</p>
+      <p>🎯 이 챕터를 읽으셨네요! ${quizCount}문항으로 간단히 확인해볼까요?</p>
       <div class="chapter-quickcheck-actions">
         <button class="btn-sm chapter-quickcheck-start" type="button">지금 테스트</button>
         <button class="btn-sm chapter-quickcheck-dismiss" type="button">나중에</button>
@@ -709,8 +714,12 @@
     h2.insertAdjacentElement("afterend", banner);
   }
 
-  function startQuickCheckQuiz(topicKey) {
-    const pool = QUIZ.filter((q) => q.topic === topicKey);
+  // 세부 단원(챕터) 단위로 그 챕터에 해당하는 문제만 모아 퀴즈를 시작한다.
+  function startQuickCheckQuiz(chapterId) {
+    const heading = CHAPTER_HEADING[chapterId];
+    const topicKey = CHAPTER_TOPIC[chapterId];
+    if (!heading || !topicKey) return;
+    const pool = QUIZ.filter((q) => q.chapter === heading);
     if (pool.length === 0) return;
     quizTopicSel.value = topicKey;
     document.querySelector('.tab-btn[data-tab="quiz"]').click();
