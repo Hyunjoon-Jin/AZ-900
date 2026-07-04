@@ -1093,11 +1093,12 @@ button {
   cursor: help;
 }
 .glossary-term .glossary-tip {
+  --tip-shift: 0px;
   display: none;
   position: absolute;
   left: 50%;
   bottom: calc(100% + 8px);
-  transform: translateX(-50%);
+  transform: translateX(calc(-50% + var(--tip-shift)));
   width: max-content;
   max-width: min(280px, calc(100vw - 2.5rem));
   padding: 0.55rem 0.75rem;
@@ -1117,7 +1118,7 @@ button {
   content: "";
   position: absolute;
   top: 100%;
-  left: 50%;
+  left: calc(50% - var(--tip-shift));
   transform: translateX(-50%);
   border: 6px solid transparent;
   border-top-color: var(--text-primary);
@@ -1127,9 +1128,15 @@ button {
 .glossary-term.tip-open .glossary-tip {
   display: block;
 }
-@media (max-width: 480px) {
-  .glossary-term .glossary-tip { left: 0; transform: none; }
-  .glossary-term .glossary-tip::after { left: 1rem; transform: none; }
+.glossary-term .glossary-tip.tip-below {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+.glossary-term .glossary-tip.tip-below::after {
+  top: auto;
+  bottom: 100%;
+  border-top-color: transparent;
+  border-bottom-color: var(--text-primary);
 }
 .markdown-view h3 { font-size: 1.05rem; margin: 1.4rem 0 0.6rem; }
 .markdown-view h4 { font-size: 0.95rem; margin: 1.1rem 0 0.5rem; color: var(--text-secondary); }

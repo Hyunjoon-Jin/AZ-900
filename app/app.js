@@ -84,12 +84,37 @@
   });
 
   // 용어 툴팁: 데스크톱은 :hover/:focus로 자동 표시되지만, 모바일은 hover가 없어 탭으로 토글해야 한다.
+  // 화면 가장자리 근처 용어는 툴팁이 뷰포트 밖으로 잘리지 않도록 위치를 보정한다.
+  function repositionGlossaryTip(term) {
+    const tip = term.querySelector(".glossary-tip");
+    if (!tip) return;
+    const margin = 10;
+    tip.style.setProperty("--tip-shift", "0px");
+    tip.classList.remove("tip-below");
+    if (tip.getBoundingClientRect().top < margin) tip.classList.add("tip-below");
+    const rect = tip.getBoundingClientRect();
+    let shift = 0;
+    if (rect.left < margin) shift = margin - rect.left;
+    else if (rect.right > window.innerWidth - margin) shift = window.innerWidth - margin - rect.right;
+    if (shift) tip.style.setProperty("--tip-shift", shift + "px");
+  }
+  document.addEventListener("mouseover", (e) => {
+    const term = e.target.closest(".glossary-term");
+    if (term) repositionGlossaryTip(term);
+  });
+  document.addEventListener("focusin", (e) => {
+    const term = e.target.closest(".glossary-term");
+    if (term) repositionGlossaryTip(term);
+  });
   document.addEventListener("click", (e) => {
     const term = e.target.closest(".glossary-term");
     document.querySelectorAll(".glossary-term.tip-open").forEach((el) => {
       if (el !== term) el.classList.remove("tip-open");
     });
-    if (term) term.classList.toggle("tip-open");
+    if (term) {
+      term.classList.toggle("tip-open");
+      if (term.classList.contains("tip-open")) repositionGlossaryTip(term);
+    }
   });
 
   // 플래시카드/퀴즈/학습 자료 탭으로 "문맥 있게" 이동한다 (필터링까지만, 실행은 사용자가 직접).
