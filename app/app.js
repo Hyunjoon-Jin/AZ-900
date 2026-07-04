@@ -388,7 +388,12 @@
           level === 2
             ? `<button class="chapter-read-toggle" type="button" data-chapter-id="${id}" aria-pressed="false"><span class="chapter-read-check">${CHECK_ICON}</span><span class="chapter-read-label">읽음으로 표시</span></button>`
             : "";
-        html += `<h${level} id="${id}"${headingClass}>${prefix}${mdInline(text)}${readToggle}</h${level}>`;
+        // 세부 단원(챕터) 단위로도 언제든 테스트를 볼 수 있는 버튼 — 읽음 표시와 무관하게 항상 노출.
+        const quickTestBtn =
+          level === 2 && CHAPTER_TOPIC[id]
+            ? `<button class="chapter-quick-test" type="button" data-chapter-id="${id}">🎯 이 챕터 테스트</button>`
+            : "";
+        html += `<h${level} id="${id}"${headingClass}>${prefix}${mdInline(text)}${readToggle}${quickTestBtn}</h${level}>`;
         if (level <= 2) toc.push({ level, id, text });
         i++;
         continue;
@@ -646,6 +651,12 @@
             existingBanner.remove();
           }
         }
+        return;
+      }
+      const quickTestBtn = e.target.closest(".chapter-quick-test");
+      if (quickTestBtn) {
+        const topicKey = CHAPTER_TOPIC[quickTestBtn.dataset.chapterId];
+        if (topicKey) startQuickCheckQuiz(topicKey);
         return;
       }
       const navBtn = e.target.closest(".chapter-nav-btn[data-toc-target]");
