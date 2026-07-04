@@ -59,6 +59,7 @@
       moveIndicatorTo(btn);
       if (activeTab === "leveltest") refreshLevelIntro();
       if (activeTab === "materials") loadMaterialsDoc(currentMaterialsDoc);
+      if (activeTab === "progress") renderProgress();
       const fab = document.getElementById("materials-back-to-top");
       if (fab && activeTab !== "materials") fab.hidden = true;
     });
@@ -70,11 +71,37 @@
   // 초기 레이아웃 계산 이후 위치를 잡는다
   requestAnimationFrame(() => moveIndicatorTo(document.querySelector(".tab-btn.active")));
 
-  document.querySelectorAll("[data-goto-tab]").forEach((el) => {
-    el.addEventListener("click", () => {
-      document.querySelector(`.tab-btn[data-tab="${el.dataset.gotoTab}"]`).click();
-    });
+  // data-goto-tab 버튼은 정적/동적 모두 지원하기 위해 이벤트 위임으로 처리한다.
+  // data-goto-topic이 함께 있으면 탭 전환 전에 해당 주제로 필터링/스크롤한다.
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-goto-tab]");
+    if (!el) return;
+    const tab = el.dataset.gotoTab;
+    const topic = el.dataset.gotoTopic;
+    if (topic) applyTopicJump(tab, topic);
+    const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+    if (btn) btn.click();
   });
+
+  // 플래시카드/퀴즈/학습 자료 탭으로 "문맥 있게" 이동한다 (필터링까지만, 실행은 사용자가 직접).
+  function applyTopicJump(tab, topic) {
+    if (!topic) return;
+    if (tab === "flashcards") {
+      fcTopicSel.value = topic;
+      loadFcDeck();
+    } else if (tab === "quiz") {
+      quizTopicSel.value = topic;
+      quizPlay.classList.add("hidden");
+      quizResult.classList.add("hidden");
+      quizSetup.classList.remove("hidden");
+    } else if (tab === "materials") {
+      document.querySelectorAll(".materials-switch-btn").forEach((b) => {
+        b.classList.toggle("active", b.dataset.doc === "study-guide");
+      });
+      currentMaterialsDoc = "study-guide";
+      loadMaterialsDoc("study-guide", topic);
+    }
+  }
 
   // ---------- 학습 자료 (마크다운 뷰어) ----------
   const MATERIALS_DOCS = {
@@ -83,6 +110,19 @@
   };
   const materialsCache = {};
   let currentMaterialsDoc = "study-plan";
+
+  const READ_CHAPTERS_KEY = "az900-read-chapters-v1";
+  function loadReadChapters() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(READ_CHAPTERS_KEY)) || []);
+    } catch (e) {
+      return new Set();
+    }
+  }
+  function saveReadChapters(set) {
+    localStorage.setItem(READ_CHAPTERS_KEY, JSON.stringify(Array.from(set)));
+  }
+  let readChapters = loadReadChapters();
 
   function escapeHtml(str) {
     return str
@@ -171,6 +211,7 @@
     let i = 0;
     let listBuffer = null;
     let calloutOpen = false;
+    let openChapterId = null;
     const usedIds = Object.create(null);
     const toc = [];
 
@@ -237,7 +278,16 @@
         } else if (partMatch) {
           headingClass = ` class="part-heading part-domain-${partMatch[1]}"`;
         }
-        html += `<h${level} id="${id}"${headingClass}>${prefix}${mdInline(text)}</h${level}>`;
+        if ((level === 1 || level === 2) && openChapterId) {
+          html += `<!--CHAPTER_NAV:${openChapterId}-->`;
+          openChapterId = null;
+        }
+        if (level === 2) openChapterId = id;
+        const readToggle =
+          level === 2
+            ? `<button class="chapter-read-toggle" type="button" data-chapter-id="${id}" aria-pressed="false"><span class="chapter-read-check">${CHECK_ICON}</span><span class="chapter-read-label">읽음으로 표시</span></button>`
+            : "";
+        html += `<h${level} id="${id}"${headingClass}>${prefix}${mdInline(text)}${readToggle}</h${level}>`;
         if (level <= 2) toc.push({ level, id, text });
         i++;
         continue;
@@ -337,12 +387,38 @@
     }
     flushList();
     closeCallout();
+    if (openChapterId) {
+      html += `<!--CHAPTER_NAV:${openChapterId}-->`;
+      openChapterId = null;
+    }
+
+    const chapters = toc.filter((t) => t.level === 2);
+    const chapterIndexOf = Object.create(null);
+    chapters.forEach((c, idx) => { chapterIndexOf[c.id] = idx; });
+    html = html.replace(/<!--CHAPTER_NAV:([^>]+)-->/g, (_, chId) => {
+      const idx = chapterIndexOf[chId];
+      const prev = idx > 0 ? chapters[idx - 1] : null;
+      const next = idx < chapters.length - 1 ? chapters[idx + 1] : null;
+      return (
+        '<nav class="chapter-nav" aria-label="챕터 이동">' +
+        `<button class="chapter-nav-btn chapter-nav-prev" type="button"${prev ? ` data-toc-target="${prev.id}"` : " disabled"}>← 이전${prev ? ": " + mdInline(prev.text) : ""}</button>` +
+        `<button class="chapter-nav-btn chapter-nav-next" type="button"${next ? ` data-toc-target="${next.id}"` : " disabled"}>다음${next ? ": " + mdInline(next.text) : ""} →</button>` +
+        "</nav>"
+      );
+    });
+
     return { html, toc };
+  }
+
+  function scrollToId(id) {
+    const target = document.getElementById(id);
+    if (target) target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
   }
 
   const materialsToc = document.getElementById("materials-toc");
   const materialsTocList = document.getElementById("materials-toc-list");
   const materialsTocCount = document.getElementById("materials-toc-count");
+  const materialsReadProgress = document.getElementById("materials-read-progress");
 
   function renderMaterialsToc(toc) {
     if (!materialsToc) return;
@@ -350,23 +426,31 @@
     if (!toc || toc.length === 0) {
       materialsToc.hidden = true;
       materialsTocList.innerHTML = "";
+      if (materialsReadProgress) materialsReadProgress.textContent = "";
       return;
     }
     materialsToc.hidden = false;
     materialsTocCount.textContent = `(${toc.length})`;
     let html = "";
     let h2Open = false;
+    const chapters = toc.filter((entry) => entry.level === 2);
     toc.forEach((entry) => {
       if (entry.level === 1) {
         if (h2Open) { html += "</ul>"; h2Open = false; }
         html += `<a class="toc-h1" href="#${entry.id}" data-toc-target="${entry.id}">${mdInline(entry.text)}</a>`;
       } else {
         if (!h2Open) { html += '<ul class="toc-h2-list">'; h2Open = true; }
-        html += `<li><a href="#${entry.id}" data-toc-target="${entry.id}">${mdInline(entry.text)}</a></li>`;
+        const isRead = readChapters.has(entry.id);
+        html += `<li><a href="#${entry.id}" data-toc-target="${entry.id}" class="${isRead ? "toc-read" : ""}">${isRead ? CHECK_ICON : ""}${mdInline(entry.text)}</a></li>`;
       }
     });
     if (h2Open) html += "</ul>";
     materialsTocList.innerHTML = html;
+    if (materialsReadProgress) {
+      materialsReadProgress.textContent = chapters.length
+        ? `· ${chapters.filter((c) => readChapters.has(c.id)).length}/${chapters.length} 챕터 읽음`
+        : "";
+    }
   }
 
   if (materialsTocList) {
@@ -374,30 +458,62 @@
       const link = e.target.closest("a[data-toc-target]");
       if (!link) return;
       e.preventDefault();
-      const target = document.getElementById(link.dataset.tocTarget);
-      if (target) target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
+      scrollToId(link.dataset.tocTarget);
       materialsToc.removeAttribute("open");
     });
   }
 
   const materialsBodyEl = document.getElementById("materials-body");
-  if (materialsBodyEl) {
-    materialsBodyEl.addEventListener("click", (e) => {
-      const link = e.target.closest('a.md-link[href^="#"]');
-      if (!link) return;
-      const targetId = link.getAttribute("href").slice(1);
-      const target = document.getElementById(targetId);
-      if (!target) return;
-      e.preventDefault();
-      target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
+
+  function applyChapterReadState(scopeEl) {
+    scopeEl.querySelectorAll(".chapter-read-toggle[data-chapter-id]").forEach((btn) => {
+      const isRead = readChapters.has(btn.dataset.chapterId);
+      btn.classList.toggle("is-read", isRead);
+      btn.setAttribute("aria-pressed", String(isRead));
+      const label = btn.querySelector(".chapter-read-label");
+      if (label) label.textContent = isRead ? "읽음" : "읽음으로 표시";
+      const h = btn.closest("h2");
+      if (h) h.classList.toggle("chapter-read", isRead);
     });
   }
 
-  function loadMaterialsDoc(docKey) {
+  if (materialsBodyEl) {
+    materialsBodyEl.addEventListener("click", (e) => {
+      const chapterBtn = e.target.closest(".chapter-read-toggle");
+      if (chapterBtn) {
+        const id = chapterBtn.dataset.chapterId;
+        if (readChapters.has(id)) readChapters.delete(id); else readChapters.add(id);
+        saveReadChapters(readChapters);
+        applyChapterReadState(materialsBodyEl);
+        const cached = materialsCache[currentMaterialsDoc];
+        if (cached) renderMaterialsToc(cached.toc);
+        return;
+      }
+      const navBtn = e.target.closest(".chapter-nav-btn[data-toc-target]");
+      if (navBtn) {
+        scrollToId(navBtn.dataset.tocTarget);
+        return;
+      }
+      const link = e.target.closest('a.md-link[href^="#"]');
+      if (!link) return;
+      e.preventDefault();
+      scrollToId(link.getAttribute("href").slice(1));
+    });
+  }
+
+  function scrollToTopicChapter(topicKey) {
+    const headings = STUDY_GUIDE_CHAPTERS[topicKey];
+    if (!headings || !headings.length) return;
+    scrollToId("sec-" + slugify(headings[0]));
+  }
+
+  function loadMaterialsDoc(docKey, scrollTopic) {
     const body = document.getElementById("materials-body");
     if (materialsCache[docKey]) {
       body.innerHTML = materialsCache[docKey].html;
       renderMaterialsToc(materialsCache[docKey].toc);
+      applyChapterReadState(body);
+      if (scrollTopic) scrollToTopicChapter(scrollTopic);
       return;
     }
     body.innerHTML = '<p class="hint">불러오는 중…</p>';
@@ -413,6 +529,8 @@
         if (currentMaterialsDoc === docKey) {
           body.innerHTML = result.html;
           renderMaterialsToc(result.toc);
+          applyChapterReadState(body);
+          if (scrollTopic) scrollToTopicChapter(scrollTopic);
         }
       })
       .catch(() => {
@@ -730,6 +848,33 @@
 
   loadFcDeck();
 
+  // ---------- 퀴즈 기록 (주제별 누적 통계, 레벨테스트와는 별도로 저장) ----------
+  const QUIZ_HISTORY_KEY = "az900-quiz-history-v1";
+  function loadQuizHistory() {
+    try {
+      return JSON.parse(localStorage.getItem(QUIZ_HISTORY_KEY)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function saveQuizHistory(data) {
+    localStorage.setItem(QUIZ_HISTORY_KEY, JSON.stringify(data));
+  }
+  function updateQuizHistory(byTopic) {
+    const history = loadQuizHistory();
+    Object.keys(byTopic).forEach((t) => {
+      const stat = byTopic[t];
+      const entry = history[t] || { attempts: 0, correct: 0, total: 0, lastPct: 0, lastAt: 0 };
+      entry.attempts += 1;
+      entry.correct += stat.correct;
+      entry.total += stat.total;
+      entry.lastPct = Math.round((stat.correct / stat.total) * 100);
+      entry.lastAt = Date.now();
+      history[t] = entry;
+    });
+    saveQuizHistory(history);
+  }
+
   // ---------- 퀴즈 ----------
   const quizTopicSel = document.getElementById("quiz-topic");
   const quizCountSel = document.getElementById("quiz-count");
@@ -877,6 +1022,7 @@
       byTopic[t].total++;
       if (log.correct) byTopic[t].correct++;
     });
+    updateQuizHistory(byTopic);
     const breakdownEl = document.getElementById("quiz-topic-breakdown");
     breakdownEl.innerHTML = "";
     Object.keys(byTopic).forEach((t) => {
@@ -890,6 +1036,7 @@
           <div class="meter-fill" style="width:${tPct}%"></div>
         </div>
         <span class="topic-frac">${stat.correct}/${stat.total}</span>
+        ${tPct < 70 ? `<button class="btn-sm" type="button" data-goto-tab="flashcards" data-goto-topic="${t}">이 주제 다시 학습</button>` : ""}
       `;
       breakdownEl.appendChild(row);
     });
@@ -905,7 +1052,11 @@
       const tagHtml = log.correct
         ? `<span class="review-tag right">${CHECK_ICON}선택: ${chosenText}</span>`
         : `<span class="review-tag wrong">${CROSS_ICON}선택: ${chosenText}</span> / 정답: ${correctText}`;
-      div.innerHTML = `<div class="review-q">${i + 1}. ${log.item.q}</div>` + tagHtml;
+      const deepLinkHtml =
+        !log.correct && STUDY_GUIDE_CHAPTERS[log.item.topic]
+          ? `<button class="btn-sm review-deep-link" type="button" data-goto-tab="materials" data-goto-topic="${log.item.topic}">교재에서 다시 보기</button>`
+          : "";
+      div.innerHTML = `<div class="review-q">${i + 1}. ${log.item.q}</div>` + tagHtml + deepLinkHtml;
       reviewEl.appendChild(div);
     });
 
@@ -941,6 +1092,8 @@
   let lvlIndex = 0;
   let lvlScore = 0;
   let lvlBusy = false;
+  let lvlLog = [];
+  let lvlWeakestTopic = null;
 
   function refreshLevelIntro() {
     const lv = loadLevel();
@@ -975,6 +1128,7 @@
     lvlIndex = 0;
     lvlScore = 0;
     lvlBusy = false;
+    lvlLog = [];
     lvlSetup.classList.add("hidden");
     lvlResult.classList.add("hidden");
     lvlPlay.classList.remove("hidden");
@@ -1008,6 +1162,7 @@
     const item = lvlDeck[lvlIndex];
     const correct = idx === item.answer;
     if (correct) lvlScore++;
+    lvlLog.push({ item, chosen: idx, correct });
 
     const optionEls = lvlOptionsEl.querySelectorAll(".quiz-option");
     optionEls.forEach((el, i) => {
@@ -1036,6 +1191,25 @@
     renderLevelBadge();
     refreshLevelIntro();
 
+    // 문항별 로그에서 정답률이 가장 낮은 주제를 계산 (동률이면 먼저 나온 주제)
+    const byTopic = {};
+    lvlLog.forEach((log) => {
+      const t = log.item.topic;
+      byTopic[t] = byTopic[t] || { correct: 0, total: 0 };
+      byTopic[t].total++;
+      if (log.correct) byTopic[t].correct++;
+    });
+    lvlWeakestTopic = null;
+    let weakestRatio = Infinity;
+    Object.keys(byTopic).forEach((t) => {
+      const stat = byTopic[t];
+      const ratio = stat.correct / stat.total;
+      if (ratio < weakestRatio) {
+        weakestRatio = ratio;
+        lvlWeakestTopic = t;
+      }
+    });
+
     animateDonut(document.getElementById("lvl-donut"), document.getElementById("lvl-donut-value"), pct);
     document.getElementById("lvl-badge-title").textContent = `레벨: ${levelLabel(level)}`;
     document.getElementById("lvl-result-caption").textContent = `${lvlDeck.length}문항 중 ${lvlScore}개 정답 (${pct}%)`;
@@ -1053,6 +1227,7 @@
     lvlSetup.classList.remove("hidden");
   });
   document.getElementById("lvl-goto-study").addEventListener("click", () => {
+    if (lvlWeakestTopic) applyTopicJump("flashcards", lvlWeakestTopic);
     document.querySelector('.tab-btn[data-tab="flashcards"]').click();
   });
 
@@ -1094,7 +1269,56 @@
     localStorage.setItem(PROGRESS_KEY, JSON.stringify(data));
   }
 
+  // 주제별 플래시카드 암기율 · 퀴즈 최근 점수 · 교재 읽음 비율을 한 줄로 보여주고 각 기능으로 바로가기 버튼을 제공한다.
+  function renderTopicMastery() {
+    const container = document.getElementById("topic-mastery");
+    if (!container) return;
+    const history = loadQuizHistory();
+    container.innerHTML = TOPICS.map((topic) => {
+      const fcCards = FLASHCARDS.filter((c) => c.topic === topic.key);
+      const fcKnown = fcCards.filter((c) => mastered.has(c.id)).length;
+      const fcPct = fcCards.length ? Math.round((fcKnown / fcCards.length) * 100) : 0;
+
+      const quizEntry = history[topic.key];
+      const quizPct = quizEntry ? quizEntry.lastPct : null;
+
+      const chapters = STUDY_GUIDE_CHAPTERS[topic.key] || [];
+      const readCount = chapters.filter((h) => readChapters.has("sec-" + slugify(h))).length;
+      const readPct = chapters.length ? Math.round((readCount / chapters.length) * 100) : 0;
+
+      const dColor = domainColor(topic.domain);
+      return `
+        <div class="topic-mastery-row">
+          <div class="topic-mastery-name">${dotHtml(dColor)}${topic.label}</div>
+          <div class="topic-mastery-stats">
+            <div class="topic-mastery-stat">
+              <span class="topic-mastery-stat-label">플래시카드</span>
+              <div class="meter" role="progressbar" aria-label="${topic.label} 플래시카드 암기율"><div class="meter-fill" style="width:${fcPct}%"></div></div>
+              <span class="topic-mastery-stat-value">${fcKnown}/${fcCards.length}</span>
+            </div>
+            <div class="topic-mastery-stat">
+              <span class="topic-mastery-stat-label">퀴즈</span>
+              <div class="meter" role="progressbar" aria-label="${topic.label} 퀴즈 최근 점수"><div class="meter-fill" style="width:${quizPct === null ? 0 : quizPct}%"></div></div>
+              <span class="topic-mastery-stat-value">${quizPct === null ? "기록 없음" : quizPct + "%"}</span>
+            </div>
+            <div class="topic-mastery-stat">
+              <span class="topic-mastery-stat-label">교재</span>
+              <div class="meter" role="progressbar" aria-label="${topic.label} 교재 읽음 비율"><div class="meter-fill" style="width:${readPct}%"></div></div>
+              <span class="topic-mastery-stat-value">${readCount}/${chapters.length}</span>
+            </div>
+          </div>
+          <div class="topic-mastery-actions">
+            <button class="btn-sm" type="button" data-goto-tab="flashcards" data-goto-topic="${topic.key}">플래시카드</button>
+            <button class="btn-sm" type="button" data-goto-tab="quiz" data-goto-topic="${topic.key}">퀴즈</button>
+            <button class="btn-sm" type="button" data-goto-tab="materials" data-goto-topic="${topic.key}">교재</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
   function renderProgress() {
+    renderTopicMastery();
     const data = loadProgress();
     const container = document.getElementById("progress-days");
     const overviewEl = document.getElementById("day-overview");
@@ -1151,6 +1375,9 @@
         const itemKey = `${day.day}-${idx}`;
         const checked = !!data[itemKey];
 
+        const itemRow = document.createElement("div");
+        itemRow.className = "day-item-row";
+
         const itemLabel = document.createElement("label");
         if (checked) itemLabel.classList.add("checked");
         const cb = document.createElement("input");
@@ -1164,7 +1391,26 @@
         });
         itemLabel.appendChild(cb);
         itemLabel.appendChild(document.createTextNode(itemText));
-        card.appendChild(itemLabel);
+        itemRow.appendChild(itemLabel);
+
+        // "플래시카드 'X'" / "퀴즈 'X'" 문장을 감지해 해당 기능으로 바로가는 버튼을 붙인다.
+        // 체크박스 토글과 섞이지 않도록 label과 형제 요소로 배치한다.
+        const jumpMatch = itemText.match(/(플래시카드|퀴즈)\s*'([^']+)'/);
+        if (jumpMatch) {
+          const targetTopic = TOPICS.find((t) => t.label === jumpMatch[2]);
+          if (targetTopic) {
+            const isFc = jumpMatch[1] === "플래시카드";
+            const jumpBtn = document.createElement("button");
+            jumpBtn.className = "btn-sm day-item-jump";
+            jumpBtn.type = "button";
+            jumpBtn.textContent = isFc ? "플래시카드로 →" : "퀴즈로 →";
+            jumpBtn.dataset.gotoTab = isFc ? "flashcards" : "quiz";
+            jumpBtn.dataset.gotoTopic = targetTopic.key;
+            itemRow.appendChild(jumpBtn);
+          }
+        }
+
+        card.appendChild(itemRow);
       });
 
       container.appendChild(card);

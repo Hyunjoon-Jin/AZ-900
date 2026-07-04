@@ -17,6 +17,69 @@ const TOPICS = [
   { key: "monitoring-tools", label: "모니터링·관리도구", domain: 3 },
 ];
 
+// 주제 키 → study-guide.md의 해당 주제 H2 헤딩 텍스트(문서 순서). 첫 항목이 "대표 챕터"로 딥링크에 쓰인다.
+const STUDY_GUIDE_CHAPTERS = {
+  "cloud-concepts": [
+    "클라우드의 핵심 이점",
+    "확장 방식: 수직 확장(Scale Up) vs 수평 확장(Scale Out)",
+    "SLA (서비스 수준 계약)",
+    "비용 모델과 계산 도구",
+    "클라우드 서비스 모델: IaaS, PaaS, SaaS",
+    "클라우드 배포 모델",
+  ],
+  architecture: [
+    "물리적 인프라: 리전과 데이터센터",
+    "가용성 보장 메커니즘",
+    "리소스 관리 계층 구조",
+    "인프라를 코드로 관리하기",
+  ],
+  compute: [
+    "가상 머신 기반 컴퓨팅",
+    "컨테이너 기반 컴퓨팅",
+    "서버리스와 자동화 워크플로",
+    "가상 데스크톱 — 내 컴퓨터 화면 자체를 빌리다",
+    "세 가지 방식 비교 — 책임과 요금이 어떻게 다를까",
+  ],
+  networking: [
+    "가상 네트워크의 기초",
+    "하이브리드 연결",
+    "부하 분산과 트래픽 라우팅",
+    "네트워크 보안",
+    "DNS와 이름 확인",
+    "프라이빗 연결",
+    "고급 연결 및 진단 도구",
+  ],
+  storage: [
+    "Blob 스토리지",
+    "액세스 계층과 수명 주기 관리",
+    "복제 옵션과 데이터 내구성",
+    "디스크와 파일 스토리지",
+    "대용량 데이터 이전 도구",
+  ],
+  "identity-security": [
+    "인증과 인가 — 헷갈리기 쉽지만 완전히 다른 개념",
+    "Microsoft Entra ID: 클라우드 세상의 신분증 발급 기관",
+    "접근 제어: RBAC와 조건부 액세스",
+    "제로 트러스트와 심층 방어",
+    "보안 모니터링과 비밀 관리",
+  ],
+  "cost-governance": [
+    "비용 산정하기 — Pricing Calculator와 TCO Calculator",
+    "실제로 얼마 나갔지? 비용 모니터링과 관리",
+    "리소스에 이름표 붙이기 — 태그",
+    "규칙을 강제하는 관리인 — Azure Policy",
+    "실수 방지 잠금장치 — 리소스 잠금",
+    "표준화된 매장 세팅 — Azure Blueprints",
+    "클라우드 도입의 큰 그림 — CAF",
+  ],
+  "monitoring-tools": [
+    "Azure Monitor — 클라우드 세상의 종합 건강 체크 시스템",
+    "Azure Advisor — 우리 아파트 전체를 봐주는 건강검진 컨설턴트",
+    "서비스 상태 확인: Service Health vs Azure Status",
+    "관리 인터페이스: Portal / CLI / PowerShell / Cloud Shell",
+  ],
+};
+
 const FLASHCARDS = [
   // --- 클라우드 개념 ---
   { topic: "cloud-concepts", front: "고가용성(High Availability)이란?", back: "장애가 발생해도 사전에 합의된 수준으로 서비스가 계속 작동하도록 하는 것. Azure는 SLA로 가용성 수준을 보장.",
