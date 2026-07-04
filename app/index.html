@@ -280,9 +280,14 @@
         <button class="materials-switch-btn" type="button" data-doc="study-guide">학습 교재</button>
       </div>
     </div>
+    <details id="materials-toc" class="materials-toc" hidden>
+      <summary>목차 <span id="materials-toc-count" class="toc-count"></span></summary>
+      <nav id="materials-toc-list" class="toc-list" aria-label="문서 목차"></nav>
+    </details>
     <div id="materials-body" class="markdown-view">
       <p class="hint">불러오는 중…</p>
     </div>
+    <button id="materials-back-to-top" class="materials-fab" type="button" hidden aria-label="맨 위로">↑</button>
   </section>
 </main>
 

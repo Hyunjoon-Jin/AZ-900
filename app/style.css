@@ -1011,6 +1011,120 @@ button {
 .markdown-view tbody tr:nth-child(even) {
   background: color-mix(in srgb, var(--text-muted) 4%, transparent);
 }
+.markdown-view h1,
+.markdown-view h2,
+.markdown-view h3,
+.markdown-view h4,
+.markdown-view p,
+.markdown-view li {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+.markdown-view h1[id],
+.markdown-view h2[id],
+.markdown-view h3[id],
+.markdown-view h4[id] {
+  scroll-margin-top: calc(var(--sticky-offset, 96px) + 12px);
+}
+
+/* ---------- 학습 교재 콜아웃 (핵심 요약 / 시험 함정) ---------- */
+.markdown-view .md-callout {
+  margin: 0 0 1.1rem;
+  padding: 0.9rem 1.1rem 1rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+.markdown-view .md-callout h3 {
+  margin-top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.markdown-view .md-callout h3 .icon { width: 18px; height: 18px; flex-shrink: 0; }
+.markdown-view .md-callout ul { margin-bottom: 0; }
+.markdown-view .md-callout-summary {
+  background: var(--good-wash);
+  border-color: color-mix(in srgb, var(--good) 35%, transparent);
+}
+.markdown-view .md-callout-summary h3 { color: var(--good); }
+.markdown-view .md-callout-pitfall {
+  background: var(--critical-wash);
+  border-color: color-mix(in srgb, var(--critical) 35%, transparent);
+}
+.markdown-view .md-callout-pitfall h3 { color: var(--critical); }
+
+/* ---------- 학습 자료 목차 ---------- */
+.materials-toc {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  padding: 0.2rem 1rem;
+}
+.materials-toc summary {
+  cursor: pointer;
+  padding: 0.7rem 0;
+  font-weight: 600;
+  color: var(--text-primary);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.materials-toc summary::-webkit-details-marker { display: none; }
+.materials-toc summary::after {
+  content: "▾";
+  margin-left: auto;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.materials-toc[open] summary::after { transform: rotate(180deg); }
+.materials-toc .toc-count { color: var(--text-muted); font-weight: 400; font-size: 0.85rem; }
+.toc-list { padding-bottom: 0.9rem; }
+.toc-list a {
+  display: block;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 0.3rem 0;
+}
+.toc-list a:hover { color: var(--accent); }
+.toc-list a.toc-h1 {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.toc-list a.toc-h1:first-child { margin-top: 0; padding-top: 0.3rem; border-top: none; }
+.toc-h2-list {
+  list-style: none;
+  margin: 0 0 0.2rem;
+  padding-left: 0.9rem;
+}
+.toc-h2-list li { margin-bottom: 0; }
+
+/* ---------- 맨 위로 가기 ---------- */
+.materials-fab {
+  position: fixed;
+  right: 1.1rem;
+  bottom: 1.1rem;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-md);
+  font-size: 1.1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 20;
+}
+.materials-fab:hover { color: var(--accent); border-color: var(--accent); }
+.materials-fab[hidden] { display: none; }
 
 /* ---------- Confetti ---------- */
 .confetti-piece {

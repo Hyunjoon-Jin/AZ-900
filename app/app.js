@@ -58,6 +58,8 @@
       moveIndicatorTo(btn);
       if (activeTab === "leveltest") refreshLevelIntro();
       if (activeTab === "materials") loadMaterialsDoc(currentMaterialsDoc);
+      const fab = document.getElementById("materials-back-to-top");
+      if (fab && activeTab !== "materials") fab.hidden = true;
     });
   });
   window.addEventListener("resize", () => {
@@ -96,6 +98,17 @@
     return s;
   }
 
+  function slugify(text) {
+    return text
+      .trim()
+      .replace(/\*\*|`/g, "")
+      .replace(/[()[\]{}"'“”‘’.,:;!?/\\]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase();
+  }
+
   function splitTableRow(line) {
     return line
       .trim()
@@ -117,11 +130,34 @@
     );
   }
 
+  const SUMMARY_HEADING_RE = /^핵심\s*요약/;
+  const PITFALL_HEADING_RE = /^시험에\s*자주\s*나오는\s*함정/;
+
   function renderMarkdown(md) {
     const lines = md.replace(/\r\n/g, "\n").split("\n");
     let html = "";
     let i = 0;
     let listBuffer = null;
+    let calloutOpen = false;
+    const usedIds = Object.create(null);
+    const toc = [];
+
+    function makeId(text) {
+      const base = "sec-" + (slugify(text) || "section");
+      if (!(base in usedIds)) {
+        usedIds[base] = 1;
+        return base;
+      }
+      usedIds[base] += 1;
+      return base + "-" + usedIds[base];
+    }
+
+    function closeCallout() {
+      if (calloutOpen) {
+        html += "</div>";
+        calloutOpen = false;
+      }
+    }
 
     function flushList() {
       if (!listBuffer) return;
@@ -151,14 +187,29 @@
       const h = line.match(/^(#{1,6})\s+(.*)$/);
       if (h) {
         flushList();
+        closeCallout();
         const level = h[1].length;
-        html += `<h${level}>${mdInline(h[2])}</h${level}>`;
+        const text = h[2];
+        const id = makeId(text);
+        let prefix = "";
+        if (level === 3 && SUMMARY_HEADING_RE.test(text)) {
+          html += '<div class="md-callout md-callout-summary">';
+          calloutOpen = true;
+          prefix = CHECK_ICON;
+        } else if (level === 3 && PITFALL_HEADING_RE.test(text)) {
+          html += '<div class="md-callout md-callout-pitfall">';
+          calloutOpen = true;
+          prefix = CROSS_ICON;
+        }
+        html += `<h${level} id="${id}">${prefix}${mdInline(text)}</h${level}>`;
+        if (level <= 2) toc.push({ level, id, text });
         i++;
         continue;
       }
 
       if (/^---+\s*$/.test(line)) {
         flushList();
+        closeCallout();
         html += "<hr>";
         i++;
         continue;
@@ -233,25 +284,71 @@
       html += `<p>${mdInline(paraLines.join(" "))}</p>`;
     }
     flushList();
-    return html;
+    closeCallout();
+    return { html, toc };
+  }
+
+  const materialsToc = document.getElementById("materials-toc");
+  const materialsTocList = document.getElementById("materials-toc-list");
+  const materialsTocCount = document.getElementById("materials-toc-count");
+
+  function renderMaterialsToc(toc) {
+    if (!materialsToc) return;
+    materialsToc.removeAttribute("open");
+    if (!toc || toc.length === 0) {
+      materialsToc.hidden = true;
+      materialsTocList.innerHTML = "";
+      return;
+    }
+    materialsToc.hidden = false;
+    materialsTocCount.textContent = `(${toc.length})`;
+    let html = "";
+    let h2Open = false;
+    toc.forEach((entry) => {
+      if (entry.level === 1) {
+        if (h2Open) { html += "</ul>"; h2Open = false; }
+        html += `<a class="toc-h1" href="#${entry.id}" data-toc-target="${entry.id}">${mdInline(entry.text)}</a>`;
+      } else {
+        if (!h2Open) { html += '<ul class="toc-h2-list">'; h2Open = true; }
+        html += `<li><a href="#${entry.id}" data-toc-target="${entry.id}">${mdInline(entry.text)}</a></li>`;
+      }
+    });
+    if (h2Open) html += "</ul>";
+    materialsTocList.innerHTML = html;
+  }
+
+  if (materialsTocList) {
+    materialsTocList.addEventListener("click", (e) => {
+      const link = e.target.closest("a[data-toc-target]");
+      if (!link) return;
+      e.preventDefault();
+      const target = document.getElementById(link.dataset.tocTarget);
+      if (target) target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
+      materialsToc.removeAttribute("open");
+    });
   }
 
   function loadMaterialsDoc(docKey) {
     const body = document.getElementById("materials-body");
     if (materialsCache[docKey]) {
-      body.innerHTML = materialsCache[docKey];
+      body.innerHTML = materialsCache[docKey].html;
+      renderMaterialsToc(materialsCache[docKey].toc);
       return;
     }
     body.innerHTML = '<p class="hint">불러오는 중…</p>';
+    if (materialsToc) materialsToc.hidden = true;
     fetch(MATERIALS_DOCS[docKey])
       .then((res) => {
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.text();
       })
       .then((md) => {
-        const html = renderMarkdown(md);
-        materialsCache[docKey] = html;
-        if (currentMaterialsDoc === docKey) body.innerHTML = html;
+        const result = renderMarkdown(md);
+        materialsCache[docKey] = result;
+        if (currentMaterialsDoc === docKey) {
+          body.innerHTML = result.html;
+          renderMaterialsToc(result.toc);
+        }
       })
       .catch(() => {
         body.innerHTML =
@@ -267,6 +364,32 @@
       loadMaterialsDoc(currentMaterialsDoc);
     });
   });
+
+  // ---------- 맨 위로 가기 + sticky 헤더 오프셋 보정 ----------
+  const appChrome = document.querySelector(".app-chrome");
+  const backToTopBtn = document.getElementById("materials-back-to-top");
+
+  function syncStickyOffset() {
+    if (!appChrome) return;
+    document.documentElement.style.setProperty("--sticky-offset", appChrome.offsetHeight + "px");
+  }
+  syncStickyOffset();
+  window.addEventListener("resize", syncStickyOffset);
+
+  if (backToTopBtn) {
+    let scrollTicking = false;
+    window.addEventListener("scroll", () => {
+      if (scrollTicking) return;
+      scrollTicking = true;
+      requestAnimationFrame(() => {
+        backToTopBtn.hidden = !(activeTab === "materials" && window.scrollY > 480);
+        scrollTicking = false;
+      });
+    });
+    backToTopBtn.addEventListener("click", () => {
+      window.scrollTo({ top: 0, behavior: prefersReducedMotion ? "auto" : "smooth" });
+    });
+  }
 
   function shuffle(arr) {
     const a = arr.slice();
