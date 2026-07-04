@@ -60,6 +60,7 @@
       if (activeTab === "leveltest") refreshLevelIntro();
       if (activeTab === "materials") loadMaterialsDoc(currentMaterialsDoc);
       if (activeTab === "progress") renderProgress();
+      renderNextStepBar();
       const fab = document.getElementById("materials-back-to-top");
       if (fab && activeTab !== "materials") fab.hidden = true;
     });
@@ -1630,5 +1631,38 @@
     animateDonut(document.getElementById("progress-donut"), document.getElementById("progress-donut-value"), pct);
   }
 
+  // 어느 탭에 있든 항상 보이는 "다음 학습 단계" 한 줄 안내 — renderLearningAnalysis와 동일한 우선순위 로직의 1순위만 노출.
+  function computeNextStep() {
+    if (!loadLevel()) {
+      return { text: "1단계: 레벨테스트로 내 실력을 먼저 확인해보세요", tab: "leveltest", topic: null, label: "레벨테스트" };
+    }
+    const quizHistory = loadQuizHistory();
+    const rows = TOPICS.map((topic) => {
+      const stats = computeTopicStats(topic, quizHistory);
+      return { topic, stats, status: classifyTopicStatus(stats.quizPct) };
+    });
+    const needsWork = rows
+      .filter((r) => r.status === "weak" || r.status === "untested")
+      .sort((a, b) => (a.status === "weak" ? a.stats.quizPct : 1000) - (b.status === "weak" ? b.stats.quizPct : 1000));
+    if (needsWork.length === 0) {
+      return { text: "모든 주제가 양호해요! 전체 총정리 퀴즈로 마무리해보세요", tab: "quiz", topic: "all", label: "퀴즈로" };
+    }
+    const top = needsWork[0];
+    const rec = recommendAction(top.stats.readPct, top.stats.fcPct);
+    return { text: `다음 추천: ${top.topic.label} — ${rec.text}`, tab: rec.action, topic: top.topic.key, label: rec.label };
+  }
+
+  function renderNextStepBar() {
+    const bar = document.getElementById("next-step-bar");
+    if (!bar) return;
+    const step = computeNextStep();
+    const topicAttr = step.topic ? ` data-goto-topic="${step.topic}"` : "";
+    bar.innerHTML = `
+      <span class="next-step-text">🧭 ${step.text}</span>
+      <button class="btn-sm" type="button" data-goto-tab="${step.tab}"${topicAttr}>${step.label}</button>
+    `;
+  }
+
   renderProgress();
+  renderNextStepBar();
 })();

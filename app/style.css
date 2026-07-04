@@ -151,6 +151,29 @@ body::before {
   border-bottom: 1px solid var(--border);
 }
 
+.next-step-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.55rem 1rem;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.next-step-text {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.next-step-bar .btn-sm { flex-shrink: 0; }
+@media (max-width: 480px) {
+  .next-step-bar { flex-wrap: wrap; }
+  .next-step-text { white-space: normal; }
+}
+
 /* ---------- Header ---------- */
 .app-header {
   position: relative;
