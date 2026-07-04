@@ -158,6 +158,14 @@
   }
   let readChapters = loadReadChapters();
 
+  // 챕터 id -> 주제 키 역매핑 (study-guide.md 챕터만 포함, study-plan.md 챕터는 매핑되지 않음).
+  const CHAPTER_TOPIC = Object.create(null);
+  Object.keys(STUDY_GUIDE_CHAPTERS).forEach((topicKey) => {
+    STUDY_GUIDE_CHAPTERS[topicKey].forEach((heading) => {
+      CHAPTER_TOPIC["sec-" + slugify(heading)] = topicKey;
+    });
+  });
+
   function escapeHtml(str) {
     return str
       .replace(/&/g, "&amp;")
@@ -559,11 +567,22 @@
       const chapterBtn = e.target.closest(".chapter-read-toggle");
       if (chapterBtn) {
         const id = chapterBtn.dataset.chapterId;
-        if (readChapters.has(id)) readChapters.delete(id); else readChapters.add(id);
+        const wasRead = readChapters.has(id);
+        if (wasRead) readChapters.delete(id); else readChapters.add(id);
         saveReadChapters(readChapters);
         applyChapterReadState(materialsBodyEl);
         const cached = materialsCache[currentMaterialsDoc];
         if (cached) renderMaterialsToc(cached.toc);
+        if (!wasRead && CHAPTER_TOPIC[id]) {
+          showChapterQuickCheckBanner(chapterBtn, id);
+        } else if (wasRead) {
+          // 다시 안읽음으로 표시하면 그 챕터용 배너도 함께 지운다(더 이상 맥락에 안 맞으므로).
+          const h2 = chapterBtn.closest("h2");
+          const existingBanner = h2 && h2.nextElementSibling;
+          if (existingBanner && existingBanner.classList && existingBanner.classList.contains("chapter-quickcheck")) {
+            existingBanner.remove();
+          }
+        }
         return;
       }
       const navBtn = e.target.closest(".chapter-nav-btn[data-toc-target]");
@@ -571,11 +590,54 @@
         scrollToId(navBtn.dataset.tocTarget);
         return;
       }
+      const qcStart = e.target.closest(".chapter-quickcheck-start");
+      if (qcStart) {
+        const banner = qcStart.closest(".chapter-quickcheck");
+        const topicKey = banner.dataset.topic;
+        banner.remove();
+        startQuickCheckQuiz(topicKey);
+        return;
+      }
+      const qcDismiss = e.target.closest(".chapter-quickcheck-dismiss");
+      if (qcDismiss) {
+        qcDismiss.closest(".chapter-quickcheck").remove();
+        return;
+      }
       const link = e.target.closest('a.md-link[href^="#"]');
       if (!link) return;
       e.preventDefault();
       scrollToId(link.getAttribute("href").slice(1));
     });
+  }
+
+  const QUICK_CHECK_SIZE = 5;
+
+  // 챕터를 읽음으로 표시하면 그 챕터가 속한 주제에서 무작위 5문항을 뽑아 바로 확인할 수 있도록 배너를 띄운다.
+  function showChapterQuickCheckBanner(chapterBtn, chapterId) {
+    const topicKey = CHAPTER_TOPIC[chapterId];
+    const h2 = chapterBtn.closest("h2");
+    if (!h2) return;
+    const existing = h2.nextElementSibling;
+    if (existing && existing.classList && existing.classList.contains("chapter-quickcheck")) existing.remove();
+    const banner = document.createElement("div");
+    banner.className = "chapter-quickcheck";
+    banner.dataset.topic = topicKey;
+    banner.innerHTML = `
+      <p>🎯 <strong>${topicLabel(topicKey)}</strong> 챕터를 읽으셨네요! ${QUICK_CHECK_SIZE}문항으로 간단히 확인해볼까요?</p>
+      <div class="chapter-quickcheck-actions">
+        <button class="btn-sm chapter-quickcheck-start" type="button">지금 테스트</button>
+        <button class="btn-sm chapter-quickcheck-dismiss" type="button">나중에</button>
+      </div>
+    `;
+    h2.insertAdjacentElement("afterend", banner);
+  }
+
+  function startQuickCheckQuiz(topicKey) {
+    const pool = QUIZ.filter((q) => q.topic === topicKey);
+    if (pool.length === 0) return;
+    quizTopicSel.value = topicKey;
+    document.querySelector('.tab-btn[data-tab="quiz"]').click();
+    startQuiz(shuffle(pool).slice(0, Math.min(QUICK_CHECK_SIZE, pool.length)));
   }
 
   function scrollToTopicChapter(topicKey) {
@@ -1346,23 +1408,27 @@
     localStorage.setItem(PROGRESS_KEY, JSON.stringify(data));
   }
 
-  // 주제별 플래시카드 암기율 · 퀴즈 최근 점수 · 교재 읽음 비율을 한 줄로 보여주고 각 기능으로 바로가기 버튼을 제공한다.
-  function renderTopicMastery() {
+  // 주제별 플래시카드 암기율/퀴즈 최근 점수/교재 읽음 비율 — renderTopicMastery와 renderLearningAnalysis가 공유.
+  function computeTopicStats(topic, quizHistory) {
+    const fcCards = FLASHCARDS.filter((c) => c.topic === topic.key);
+    const fcKnown = fcCards.filter((c) => mastered.has(c.id)).length;
+    const fcPct = fcCards.length ? Math.round((fcKnown / fcCards.length) * 100) : 0;
+
+    const quizEntry = quizHistory[topic.key];
+    const quizPct = quizEntry ? quizEntry.lastPct : null;
+
+    const chapters = STUDY_GUIDE_CHAPTERS[topic.key] || [];
+    const readCount = chapters.filter((h) => readChapters.has("sec-" + slugify(h))).length;
+    const readPct = chapters.length ? Math.round((readCount / chapters.length) * 100) : 0;
+
+    return { fcCards, fcKnown, fcPct, quizEntry, quizPct, chapters, readCount, readPct };
+  }
+
+  function renderTopicMastery(quizHistory) {
     const container = document.getElementById("topic-mastery");
     if (!container) return;
-    const history = loadQuizHistory();
     container.innerHTML = TOPICS.map((topic) => {
-      const fcCards = FLASHCARDS.filter((c) => c.topic === topic.key);
-      const fcKnown = fcCards.filter((c) => mastered.has(c.id)).length;
-      const fcPct = fcCards.length ? Math.round((fcKnown / fcCards.length) * 100) : 0;
-
-      const quizEntry = history[topic.key];
-      const quizPct = quizEntry ? quizEntry.lastPct : null;
-
-      const chapters = STUDY_GUIDE_CHAPTERS[topic.key] || [];
-      const readCount = chapters.filter((h) => readChapters.has("sec-" + slugify(h))).length;
-      const readPct = chapters.length ? Math.round((readCount / chapters.length) * 100) : 0;
-
+      const s = computeTopicStats(topic, quizHistory);
       const dColor = domainColor(topic.domain);
       return `
         <div class="topic-mastery-row">
@@ -1370,18 +1436,18 @@
           <div class="topic-mastery-stats">
             <div class="topic-mastery-stat">
               <span class="topic-mastery-stat-label">플래시카드</span>
-              <div class="meter" role="progressbar" aria-label="${topic.label} 플래시카드 암기율"><div class="meter-fill" style="width:${fcPct}%"></div></div>
-              <span class="topic-mastery-stat-value">${fcKnown}/${fcCards.length}</span>
+              <div class="meter" role="progressbar" aria-label="${topic.label} 플래시카드 암기율"><div class="meter-fill" style="width:${s.fcPct}%"></div></div>
+              <span class="topic-mastery-stat-value">${s.fcKnown}/${s.fcCards.length}</span>
             </div>
             <div class="topic-mastery-stat">
               <span class="topic-mastery-stat-label">퀴즈</span>
-              <div class="meter" role="progressbar" aria-label="${topic.label} 퀴즈 최근 점수"><div class="meter-fill" style="width:${quizPct === null ? 0 : quizPct}%"></div></div>
-              <span class="topic-mastery-stat-value">${quizPct === null ? "기록 없음" : quizPct + "%"}</span>
+              <div class="meter" role="progressbar" aria-label="${topic.label} 퀴즈 최근 점수"><div class="meter-fill" style="width:${s.quizPct === null ? 0 : s.quizPct}%"></div></div>
+              <span class="topic-mastery-stat-value">${s.quizPct === null ? "기록 없음" : s.quizPct + "%"}</span>
             </div>
             <div class="topic-mastery-stat">
               <span class="topic-mastery-stat-label">교재</span>
-              <div class="meter" role="progressbar" aria-label="${topic.label} 교재 읽음 비율"><div class="meter-fill" style="width:${readPct}%"></div></div>
-              <span class="topic-mastery-stat-value">${readCount}/${chapters.length}</span>
+              <div class="meter" role="progressbar" aria-label="${topic.label} 교재 읽음 비율"><div class="meter-fill" style="width:${s.readPct}%"></div></div>
+              <span class="topic-mastery-stat-value">${s.readCount}/${s.chapters.length}</span>
             </div>
           </div>
           <div class="topic-mastery-actions">
@@ -1394,8 +1460,74 @@
     }).join("");
   }
 
+  // 퀴즈 결과 화면과 동일한 85%/70% 기준으로 강점/보통/약점/미응시를 분류한다.
+  function classifyTopicStatus(quizPct) {
+    if (quizPct === null) return "untested";
+    if (quizPct >= 85) return "strong";
+    if (quizPct >= 70) return "average";
+    return "weak";
+  }
+
+  // 읽음%가 낮으면 교재부터, 암기%가 낮으면 플래시카드부터, 둘 다 괜찮으면 퀴즈로 실전 감각 점검을 추천한다.
+  function recommendAction(readPct, fcPct) {
+    if (readPct < 50) return { action: "materials", label: "교재로", text: "교재를 먼저 읽어보세요" };
+    if (fcPct < 50) return { action: "flashcards", label: "플래시카드로", text: "플래시카드로 개념을 복습해보세요" };
+    return { action: "quiz", label: "퀴즈로", text: "퀴즈로 실전 감각을 점검해보세요" };
+  }
+
+  function renderLearningAnalysis(quizHistory) {
+    const container = document.getElementById("learning-analysis");
+    if (!container) return;
+
+    const rows = TOPICS.map((topic) => {
+      const stats = computeTopicStats(topic, quizHistory);
+      const status = classifyTopicStatus(stats.quizPct);
+      return { topic, stats, status };
+    });
+
+    const counts = { strong: 0, average: 0, weak: 0, untested: 0 };
+    rows.forEach((r) => counts[r.status]++);
+
+    const needsWork = rows
+      .filter((r) => r.status === "weak" || r.status === "untested")
+      .sort((a, b) => {
+        const rank = (r) => (r.status === "weak" ? r.stats.quizPct : 1000);
+        return rank(a) - rank(b);
+      });
+
+    const strengths = rows.filter((r) => r.status === "strong").map((r) => r.topic.label);
+
+    const summaryHtml = `<p class="analysis-summary">강점 ${counts.strong} · 보통 ${counts.average} · 약점 ${counts.weak} · 미응시 ${counts.untested}</p>`;
+    const strengthsHtml = strengths.length
+      ? `<p class="analysis-strengths">💪 강점 주제: ${strengths.join(", ")}</p>`
+      : "";
+
+    const rowsHtml = needsWork.length
+      ? needsWork
+          .map((r) => {
+            const rec = recommendAction(r.stats.readPct, r.stats.fcPct);
+            const badgeLabel = r.status === "weak" ? "약점" : "미응시";
+            const pctLabel = r.stats.quizPct === null ? "테스트 기록 없음" : `퀴즈 ${r.stats.quizPct}%`;
+            return `
+              <div class="analysis-row">
+                <span class="analysis-topic">${dotHtml(domainColor(r.topic.domain))}${r.topic.label}</span>
+                <span class="analysis-badge analysis-badge-${r.status}">${badgeLabel}</span>
+                <span class="analysis-pct">${pctLabel}</span>
+                <span class="analysis-rec-text">${rec.text}</span>
+                <button class="btn-sm" type="button" data-goto-tab="${rec.action}" data-goto-topic="${r.topic.key}">${rec.label}</button>
+              </div>
+            `;
+          })
+          .join("")
+      : `<p class="analysis-empty">모든 주제가 양호해요. 꾸준히 복습만 이어가면 됩니다 🎉</p>`;
+
+    container.innerHTML = summaryHtml + strengthsHtml + rowsHtml;
+  }
+
   function renderProgress() {
-    renderTopicMastery();
+    const quizHistory = loadQuizHistory();
+    renderLearningAnalysis(quizHistory);
+    renderTopicMastery(quizHistory);
     const data = loadProgress();
     const container = document.getElementById("progress-days");
     const overviewEl = document.getElementById("day-overview");
