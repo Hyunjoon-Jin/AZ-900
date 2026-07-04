@@ -391,6 +391,13 @@ main {
   font-size: 0.88rem;
 }
 
+.quiz-wrong-review {
+  display: flex;
+  justify-content: center;
+  margin: -0.4rem 0 1.2rem;
+}
+.quiz-wrong-review button[disabled] { opacity: 0.45; cursor: default; }
+
 /* ---------- Buttons ---------- */
 button {
   cursor: pointer;
@@ -711,6 +718,12 @@ button {
 .quiz-option.incorrect::after {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d03b3b' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E");
 }
+/* 모의고사: 즉시 채점 없이 "선택됨"만 표시 (정답/오답 색상과 구분되는 accent 톤) */
+.quiz-option.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.quiz-option.selected .opt-key { background: var(--accent); color: #fff; }
 
 .quiz-explain {
   padding: 0.85rem 1rem;
@@ -920,6 +933,83 @@ button {
   flex: 1 1 160px;
 }
 .analysis-empty { color: var(--text-muted); font-size: 0.9rem; }
+
+.session-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.4rem;
+}
+.session-log-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 0.55rem 0.85rem;
+  font-size: 0.82rem;
+}
+.session-log-date { color: var(--text-muted); flex-shrink: 0; width: 78px; font-variant-numeric: tabular-nums; }
+.session-log-mode { color: var(--text-secondary); font-weight: 600; flex-shrink: 0; }
+.session-log-topic { color: var(--text-muted); flex: 1; }
+.session-log-score { color: var(--text-secondary); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+/* ---------- 모의고사 ---------- */
+.mock-play-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.8rem;
+}
+.mock-timer {
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.mock-timer.mock-timer-warning { color: var(--critical); }
+.mock-index-label { font-size: 0.85rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.mock-nav-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+.mock-nav-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.mock-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+.mock-nav-btn.answered { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); }
+.mock-nav-btn.current { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mock-nav-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.mock-nav-actions .btn-outline { flex: 1; }
+.mock-nav-actions .btn-primary { flex-shrink: 0; }
+.pass-badge {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  margin-bottom: 0.3rem;
+}
+.pass-badge.pass { background: var(--good-wash); color: var(--good); }
+.pass-badge.fail { background: var(--critical-wash); color: var(--critical); }
 
 #quiz-result-summary, .result-summary { font-size: 1.05rem; font-weight: 600; }
 .review-item {

@@ -60,6 +60,8 @@
       if (activeTab === "leveltest") refreshLevelIntro();
       if (activeTab === "materials") loadMaterialsDoc(currentMaterialsDoc);
       if (activeTab === "progress") renderProgress();
+      if (activeTab === "quiz") refreshWrongReviewButton();
+      if (activeTab === "mockexam") renderMockExamSetup();
       renderNextStepBar();
       const fab = document.getElementById("materials-back-to-top");
       if (fab && activeTab !== "materials") fab.hidden = true;
@@ -988,6 +990,8 @@
 
   loadFcDeck();
 
+  QUIZ.forEach((q, i) => { q.id = i; });
+
   // ---------- 퀴즈 기록 (주제별 누적 통계, 레벨테스트와는 별도로 저장) ----------
   const QUIZ_HISTORY_KEY = "az900-quiz-history-v1";
   function loadQuizHistory() {
@@ -1015,6 +1019,54 @@
     saveQuizHistory(history);
   }
 
+  // 문항별 오답 추적: 틀린 문제는 missCount 증가, 2연속 정답이면 "극복"으로 보고 추적 해제.
+  const WRONG_TRACKER_KEY = "az900-wrong-tracker-v1";
+  function loadWrongTracker() {
+    try {
+      return JSON.parse(localStorage.getItem(WRONG_TRACKER_KEY)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function saveWrongTracker(data) {
+    localStorage.setItem(WRONG_TRACKER_KEY, JSON.stringify(data));
+  }
+  function recordWrongTracker(log) {
+    const tracker = loadWrongTracker();
+    log.forEach(({ item, correct }) => {
+      const existing = tracker[item.id];
+      if (correct) {
+        if (!existing) return; // 원래 틀린 적 없는 문제는 추적하지 않는다
+        existing.correctStreak += 1;
+        if (existing.correctStreak >= 2) delete tracker[item.id];
+        else tracker[item.id] = existing;
+      } else {
+        const entry = existing || { missCount: 0, correctStreak: 0, lastWrongAt: 0 };
+        entry.missCount += 1;
+        entry.correctStreak = 0;
+        entry.lastWrongAt = Date.now();
+        tracker[item.id] = entry;
+      }
+    });
+    saveWrongTracker(tracker);
+  }
+
+  // 응시 이력(퀴즈/오답복습/모의고사) 로그 — 최근 20건만 유지.
+  const QUIZ_SESSION_LOG_KEY = "az900-quiz-sessions-v1";
+  const SESSION_LOG_MAX = 20;
+  function loadSessionLog() {
+    try {
+      return JSON.parse(localStorage.getItem(QUIZ_SESSION_LOG_KEY)) || [];
+    } catch (e) {
+      return [];
+    }
+  }
+  function appendSessionLog(entry) {
+    const log = loadSessionLog();
+    log.unshift(entry);
+    localStorage.setItem(QUIZ_SESSION_LOG_KEY, JSON.stringify(log.slice(0, SESSION_LOG_MAX)));
+  }
+
   // ---------- 퀴즈 ----------
   const quizTopicSel = document.getElementById("quiz-topic");
   const quizCountSel = document.getElementById("quiz-count");
@@ -1038,6 +1090,7 @@
   let quizScore = 0;
   let quizAnswered = false;
   let quizLog = [];
+  let quizSessionMode = "quiz"; // "quiz" | "wrong-review" | 응시 이력에 기록되는 세션 종류
 
   // 정답 위치를 무작위로 섞어 "항상 첫 번째가 정답"이 되지 않도록 함
   function shuffleOptions(item) {
@@ -1047,11 +1100,12 @@
     return Object.assign({}, item, { options, answer });
   }
 
-  function startQuiz(items) {
+  function startQuiz(items, mode) {
     quizDeck = items.map(shuffleOptions);
     quizIndex = 0;
     quizScore = 0;
     quizLog = [];
+    quizSessionMode = mode || "quiz";
     quizSetup.classList.add("hidden");
     quizResult.classList.add("hidden");
     quizPlay.classList.remove("hidden");
@@ -1068,6 +1122,34 @@
     }
     startQuiz(shuffle(pool).slice(0, Math.min(count, pool.length)));
   });
+
+  const WRONG_REVIEW_POOL_MAX = 20;
+  function refreshWrongReviewButton() {
+    const btn = document.getElementById("quiz-wrong-review-start");
+    if (!btn) return;
+    const tracker = loadWrongTracker();
+    const count = Object.keys(tracker).length;
+    if (count === 0) {
+      btn.textContent = "자주 틀리는 문제 복습 (아직 기록 없음)";
+      btn.disabled = true;
+    } else {
+      btn.textContent = `자주 틀리는 문제 복습 (${Math.min(count, WRONG_REVIEW_POOL_MAX)}문항)`;
+      btn.disabled = false;
+    }
+  }
+  document.getElementById("quiz-wrong-review-start").addEventListener("click", () => {
+    const tracker = loadWrongTracker();
+    const ids = Object.keys(tracker)
+      .map(Number)
+      .sort((a, b) => tracker[b].missCount - tracker[a].missCount);
+    const pool = ids
+      .slice(0, WRONG_REVIEW_POOL_MAX)
+      .map((id) => QUIZ.find((q) => q.id === id))
+      .filter(Boolean);
+    if (pool.length === 0) return;
+    startQuiz(pool, "wrong-review");
+  });
+  refreshWrongReviewButton();
 
   function renderQuizQuestion() {
     quizAnswered = false;
@@ -1163,6 +1245,17 @@
       if (log.correct) byTopic[t].correct++;
     });
     updateQuizHistory(byTopic);
+    recordWrongTracker(quizLog);
+    const sessionTopics = new Set(quizLog.map((l) => l.item.topic));
+    appendSessionLog({
+      at: Date.now(),
+      mode: quizSessionMode,
+      topic: sessionTopics.size === 1 ? [...sessionTopics][0] : "all",
+      count: quizDeck.length,
+      correct: quizScore,
+      pct,
+    });
+    refreshWrongReviewButton();
     const breakdownEl = document.getElementById("quiz-topic-breakdown");
     breakdownEl.innerHTML = "";
     Object.keys(byTopic).forEach((t) => {
@@ -1226,7 +1319,7 @@
   const lvlProgressEl = document.getElementById("lvl-progress");
   const lvlMeterFill = document.getElementById("lvl-meter-fill");
   const lvlMeterLabel = document.getElementById("lvl-meter-label");
-  const LEVEL_TEST_SIZE = 12;
+  const LEVEL_TEST_SIZE = 16;
 
   let lvlDeck = [];
   let lvlIndex = 0;
@@ -1327,11 +1420,13 @@
     lvlResult.classList.remove("hidden");
     const pct = Math.round((lvlScore / lvlDeck.length) * 100);
     const level = computeLevel(pct);
-    saveLevel({ level, pct });
+    const prevLevel = loadLevel();
+    const history = ((prevLevel && prevLevel.history) || []).concat([{ pct, at: Date.now() }]).slice(-5);
+    saveLevel({ level, pct, history });
     renderLevelBadge();
     refreshLevelIntro();
 
-    // 문항별 로그에서 정답률이 가장 낮은 주제를 계산 (동률이면 먼저 나온 주제)
+    // 문항별 로그에서 주제별 정답률을 계산 (가장 취약한 주제 + 전체 분석표에 공용으로 사용)
     const byTopic = {};
     lvlLog.forEach((log) => {
       const t = log.item.topic;
@@ -1352,13 +1447,37 @@
 
     animateDonut(document.getElementById("lvl-donut"), document.getElementById("lvl-donut-value"), pct);
     document.getElementById("lvl-badge-title").textContent = `레벨: ${levelLabel(level)}`;
-    document.getElementById("lvl-result-caption").textContent = `${lvlDeck.length}문항 중 ${lvlScore}개 정답 (${pct}%)`;
+    const trendText =
+      prevLevel && typeof prevLevel.pct === "number"
+        ? pct === prevLevel.pct
+          ? " (지난번과 동일)"
+          : ` (지난번 대비 ${pct > prevLevel.pct ? "+" : ""}${pct - prevLevel.pct}%p)`
+        : "";
+    document.getElementById("lvl-result-caption").textContent = `${lvlDeck.length}문항 중 ${lvlScore}개 정답 (${pct}%)${trendText}`;
     document.getElementById("lvl-result-detail").textContent =
       level === "advanced"
         ? "탄탄한 기본기를 갖췄어요. 플래시카드·퀴즈에서 상세 설명과 실전 팁까지 기본으로 펼쳐서 보여드릴게요."
         : level === "intermediate"
         ? "기본 개념은 잡혀 있어요. 상세 설명은 기본으로 펼쳐 드리고, 실전 팁은 필요할 때 펼쳐보세요."
         : "차근차근 시작해봐요. 우선 핵심 요약 위주로 보여드리고, 더 알고 싶을 때 상세 설명과 실전 팁을 펼쳐볼 수 있어요.";
+
+    const lvlBreakdownEl = document.getElementById("lvl-topic-breakdown");
+    lvlBreakdownEl.innerHTML = "";
+    Object.keys(byTopic).forEach((t) => {
+      const stat = byTopic[t];
+      const tPct = Math.round((stat.correct / stat.total) * 100);
+      const row = document.createElement("div");
+      row.className = "topic-row";
+      row.innerHTML = `
+        <span class="topic-name">${dotHtml(domainColor(topicDomain(t)))}${topicLabel(t)}</span>
+        <div class="meter" role="progressbar" aria-label="${topicLabel(t)} 정답률">
+          <div class="meter-fill" style="width:${tPct}%"></div>
+        </div>
+        <span class="topic-frac">${stat.correct}/${stat.total}</span>
+        ${tPct < 70 ? `<button class="btn-sm" type="button" data-goto-tab="flashcards" data-goto-topic="${t}">이 주제 다시 학습</button>` : ""}
+      `;
+      lvlBreakdownEl.appendChild(row);
+    });
   }
 
   document.getElementById("lvl-start").addEventListener("click", startLevelTest);
@@ -1370,6 +1489,305 @@
     if (lvlWeakestTopic) applyTopicJump("flashcards", lvlWeakestTopic);
     document.querySelector('.tab-btn[data-tab="flashcards"]').click();
   });
+
+  // ---------- 모의고사 ----------
+  const MOCK_EXAM_SIZE = 40;
+  const MOCK_EXAM_MINUTES = 50;
+  const DOMAIN_WEIGHTS = { 1: 0.28, 2: 0.37, 3: 0.35 }; // 실제 AZ-900 도메인 비중(25-30/35-40/30-35%) 근사치
+  const DOMAIN_LABELS = { 1: "클라우드 개념", 2: "Azure 아키텍처·서비스", 3: "관리·거버넌스" };
+
+  const MOCK_EXAM_HISTORY_KEY = "az900-mock-exam-v1";
+  const MOCK_EXAM_HISTORY_MAX = 10;
+  function loadMockExamHistory() {
+    try {
+      return JSON.parse(localStorage.getItem(MOCK_EXAM_HISTORY_KEY)) || [];
+    } catch (e) {
+      return [];
+    }
+  }
+  function saveMockExamHistoryEntry(entry) {
+    const list = loadMockExamHistory();
+    list.unshift(entry);
+    localStorage.setItem(MOCK_EXAM_HISTORY_KEY, JSON.stringify(list.slice(0, MOCK_EXAM_HISTORY_MAX)));
+  }
+
+  // 도메인 비중대로 문항 수를 배분(마지막 도메인이 반올림 오차를 흡수해 합계를 정확히 맞춤)한 뒤 각 도메인 풀에서 무작위 추출.
+  function sampleMockExamQuestions() {
+    const byDomain = { 1: [], 2: [], 3: [] };
+    QUIZ.forEach((q) => {
+      const domain = topicDomain(q.topic);
+      if (byDomain[domain]) byDomain[domain].push(q);
+    });
+    const domains = [1, 2, 3];
+    const counts = {};
+    let assigned = 0;
+    domains.forEach((d, idx) => {
+      if (idx < domains.length - 1) {
+        counts[d] = Math.round(MOCK_EXAM_SIZE * DOMAIN_WEIGHTS[d]);
+        assigned += counts[d];
+      } else {
+        counts[d] = MOCK_EXAM_SIZE - assigned;
+      }
+    });
+    const picked = [];
+    domains.forEach((d) => {
+      picked.push(...shuffle(byDomain[d]).slice(0, Math.min(counts[d], byDomain[d].length)));
+    });
+    return shuffle(picked);
+  }
+
+  let mockDeck = [];
+  let mockAnswers = [];
+  let mockIndex = 0;
+  let mockEndAt = null;
+  let mockStartedAt = null;
+  let mockTimerInterval = null;
+
+  const mockSetupEl = document.getElementById("mock-setup");
+  const mockPlayEl = document.getElementById("mock-play");
+  const mockResultEl = document.getElementById("mock-result");
+  const mockNavGridEl = document.getElementById("mock-nav-grid");
+  const mockOptionsEl = document.getElementById("mock-options");
+
+  function renderMockExamSetup() {
+    const container = document.getElementById("mock-history-list");
+    if (!container) return;
+    const history = loadMockExamHistory();
+    if (history.length === 0) {
+      container.innerHTML = '<p class="hint">아직 응시한 모의고사가 없어요.</p>';
+      return;
+    }
+    container.innerHTML = history
+      .map((h) => {
+        const date = new Date(h.at);
+        const dateLabel = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+        return `
+          <div class="session-log-row">
+            <span class="session-log-date">${dateLabel}</span>
+            <span class="pass-badge ${h.passed ? "pass" : "fail"}">${h.passed ? "합격" : "불합격"}</span>
+            <span class="session-log-score">${h.score}점 (${h.correct}/${h.total})</span>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  function renderMockNavigator() {
+    mockNavGridEl.innerHTML = mockDeck
+      .map((_, i) => {
+        const classes = ["mock-nav-btn"];
+        if (mockAnswers[i] !== null) classes.push("answered");
+        if (i === mockIndex) classes.push("current");
+        return `<button class="${classes.join(" ")}" type="button" data-idx="${i}">${i + 1}</button>`;
+      })
+      .join("");
+  }
+
+  function renderMockQuestion() {
+    const item = mockDeck[mockIndex];
+    document.getElementById("mock-progress").innerHTML = dotHtml(domainColor(topicDomain(item.topic))) + topicLabel(item.topic);
+    document.getElementById("mock-index-label").textContent = `${mockIndex + 1} / ${mockDeck.length}`;
+    document.getElementById("mock-question").textContent = item.q;
+    mockOptionsEl.innerHTML = "";
+    item.options.forEach((optText, idx) => {
+      const btn = document.createElement("button");
+      btn.className = "quiz-option" + (mockAnswers[mockIndex] === idx ? " selected" : "");
+      const keyEl = document.createElement("span");
+      keyEl.className = "opt-key";
+      keyEl.textContent = OPT_KEYS[idx];
+      btn.appendChild(keyEl);
+      btn.appendChild(document.createTextNode(optText));
+      btn.addEventListener("click", () => selectMockAnswer(idx));
+      mockOptionsEl.appendChild(btn);
+    });
+    document.getElementById("mock-prev").disabled = mockIndex === 0;
+    document.getElementById("mock-next").disabled = mockIndex === mockDeck.length - 1;
+  }
+
+  function selectMockAnswer(idx) {
+    mockAnswers[mockIndex] = idx;
+    renderMockQuestion();
+    renderMockNavigator();
+  }
+
+  mockNavGridEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".mock-nav-btn");
+    if (!btn) return;
+    mockIndex = parseInt(btn.dataset.idx, 10);
+    renderMockQuestion();
+    renderMockNavigator();
+  });
+  document.getElementById("mock-prev").addEventListener("click", () => {
+    if (mockIndex > 0) {
+      mockIndex--;
+      renderMockQuestion();
+      renderMockNavigator();
+    }
+  });
+  document.getElementById("mock-next").addEventListener("click", () => {
+    if (mockIndex < mockDeck.length - 1) {
+      mockIndex++;
+      renderMockQuestion();
+      renderMockNavigator();
+    }
+  });
+
+  function updateMockTimerDisplay() {
+    const el = document.getElementById("mock-timer");
+    if (!el) return;
+    const remainingMs = Math.max(0, mockEndAt - Date.now());
+    const totalSec = Math.ceil(remainingMs / 1000);
+    const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
+    const ss = String(totalSec % 60).padStart(2, "0");
+    el.textContent = `${mm}:${ss}`;
+    el.classList.toggle("mock-timer-warning", totalSec <= 300);
+  }
+  function stopMockTimer() {
+    if (mockTimerInterval) {
+      clearInterval(mockTimerInterval);
+      mockTimerInterval = null;
+    }
+  }
+  function startMockTimer() {
+    updateMockTimerDisplay();
+    mockTimerInterval = setInterval(() => {
+      updateMockTimerDisplay();
+      if (Date.now() >= mockEndAt) finishMockExam(true);
+    }, 1000);
+  }
+
+  function startMockExam() {
+    mockDeck = sampleMockExamQuestions().map(shuffleOptions);
+    mockAnswers = new Array(mockDeck.length).fill(null);
+    mockIndex = 0;
+    mockStartedAt = Date.now();
+    mockEndAt = mockStartedAt + MOCK_EXAM_MINUTES * 60000;
+    mockSetupEl.classList.add("hidden");
+    mockResultEl.classList.add("hidden");
+    mockPlayEl.classList.remove("hidden");
+    renderMockQuestion();
+    renderMockNavigator();
+    startMockTimer();
+  }
+  document.getElementById("mock-start").addEventListener("click", startMockExam);
+
+  document.getElementById("mock-submit").addEventListener("click", () => {
+    const unanswered = mockAnswers.filter((a) => a === null).length;
+    if (unanswered > 0 && !confirm(`아직 ${unanswered}문항에 답하지 않았습니다. 제출하시겠습니까?`)) return;
+    finishMockExam(false);
+  });
+
+  function renderMockBreakdown(containerEl, groups, labelFor, colorFor, withJump) {
+    containerEl.innerHTML = "";
+    Object.keys(groups).forEach((key) => {
+      const stat = groups[key];
+      const pct = Math.round((stat.correct / stat.total) * 100);
+      const row = document.createElement("div");
+      row.className = "topic-row";
+      row.innerHTML = `
+        <span class="topic-name">${dotHtml(colorFor(key))}${labelFor(key)}</span>
+        <div class="meter" role="progressbar" aria-label="${labelFor(key)} 정답률">
+          <div class="meter-fill" style="width:${pct}%"></div>
+        </div>
+        <span class="topic-frac">${stat.correct}/${stat.total}</span>
+        ${withJump && pct < 70 ? `<button class="btn-sm" type="button" data-goto-tab="flashcards" data-goto-topic="${key}">이 주제 다시 학습</button>` : ""}
+      `;
+      containerEl.appendChild(row);
+    });
+  }
+
+  function finishMockExam(auto) {
+    stopMockTimer();
+    mockPlayEl.classList.add("hidden");
+    mockResultEl.classList.remove("hidden");
+
+    const log = mockDeck.map((item, i) => ({
+      item,
+      chosen: mockAnswers[i],
+      correct: mockAnswers[i] === item.answer,
+    }));
+    const total = log.length;
+    const correctCount = log.filter((l) => l.correct).length;
+    const scaledScore = Math.round((correctCount / total) * 1000);
+    const passed = scaledScore >= 700;
+
+    animateDonut(document.getElementById("mock-donut"), document.getElementById("mock-donut-value"), Math.round((correctCount / total) * 100));
+    document.getElementById("mock-score-summary").textContent = `${scaledScore}점 / 1000점 (${correctCount}/${total}문항 정답)`;
+    const badgeEl = document.getElementById("mock-pass-badge");
+    badgeEl.textContent = passed ? "합격 (PASS)" : "불합격 (FAIL)";
+    badgeEl.className = "pass-badge " + (passed ? "pass" : "fail");
+    document.getElementById("mock-result-caption").textContent = auto
+      ? "시간이 종료되어 자동으로 제출되었습니다."
+      : passed
+      ? "축하해요! 실전에서도 좋은 결과가 있을 거예요."
+      : "합격선(700점)에는 아직 못 미쳤어요. 약점 도메인을 더 학습하고 재도전해 보세요.";
+
+    if (passed) launchConfetti();
+
+    const byDomain = {};
+    log.forEach((l) => {
+      const d = topicDomain(l.item.topic);
+      byDomain[d] = byDomain[d] || { correct: 0, total: 0 };
+      byDomain[d].total++;
+      if (l.correct) byDomain[d].correct++;
+    });
+    renderMockBreakdown(document.getElementById("mock-domain-breakdown"), byDomain, (d) => DOMAIN_LABELS[d], (d) => domainColor(Number(d)), false);
+
+    const byTopic = {};
+    log.forEach((l) => {
+      const t = l.item.topic;
+      byTopic[t] = byTopic[t] || { correct: 0, total: 0 };
+      byTopic[t].total++;
+      if (l.correct) byTopic[t].correct++;
+    });
+    renderMockBreakdown(document.getElementById("mock-topic-breakdown"), byTopic, (t) => topicLabel(t), (t) => domainColor(topicDomain(t)), true);
+
+    const reviewEl = document.getElementById("mock-review");
+    reviewEl.innerHTML = "";
+    log.forEach((l, i) => {
+      const div = document.createElement("div");
+      div.className = "review-item " + (l.correct ? "right" : "wrong");
+      const chosenText = l.chosen === null ? "(답변 안 함)" : l.item.options[l.chosen];
+      const correctText = l.item.options[l.item.answer];
+      const tagHtml = l.correct
+        ? `<span class="review-tag right">${CHECK_ICON}선택: ${chosenText}</span>`
+        : `<span class="review-tag wrong">${CROSS_ICON}선택: ${chosenText}</span> / 정답: ${correctText}`;
+      const deepLinkHtml =
+        !l.correct && STUDY_GUIDE_CHAPTERS[l.item.topic]
+          ? `<button class="btn-sm review-deep-link" type="button" data-goto-tab="materials" data-goto-topic="${l.item.topic}">교재에서 다시 보기</button>`
+          : "";
+      div.innerHTML = `<div class="review-q">${i + 1}. ${l.item.q}</div>` + tagHtml + deepLinkHtml;
+      reviewEl.appendChild(div);
+    });
+
+    updateQuizHistory(byTopic);
+    recordWrongTracker(log);
+    appendSessionLog({
+      at: Date.now(),
+      mode: "mock-exam",
+      topic: "all",
+      count: total,
+      correct: correctCount,
+      pct: Math.round((correctCount / total) * 100),
+    });
+    saveMockExamHistoryEntry({
+      at: Date.now(),
+      score: scaledScore,
+      passed,
+      correct: correctCount,
+      total,
+      durationSec: Math.round((Date.now() - mockStartedAt) / 1000),
+    });
+    refreshWrongReviewButton();
+  }
+
+  document.getElementById("mock-retry").addEventListener("click", () => {
+    mockResultEl.classList.add("hidden");
+    mockSetupEl.classList.remove("hidden");
+    renderMockExamSetup();
+  });
+
+  renderMockExamSetup();
 
   // ---------- 키보드 단축키 ----------
   document.addEventListener("keydown", (e) => {
@@ -1391,6 +1809,12 @@
     } else if (activeTab === "leveltest") {
       if (!lvlPlay.classList.contains("hidden") && !lvlBusy && OPT_KEYS.includes(e.key)) {
         selectLvlAnswer(OPT_KEYS.indexOf(e.key));
+      }
+    } else if (activeTab === "mockexam") {
+      if (!mockPlayEl.classList.contains("hidden")) {
+        if (OPT_KEYS.includes(e.key)) { selectMockAnswer(OPT_KEYS.indexOf(e.key)); }
+        else if (e.key === "ArrowRight") { document.getElementById("mock-next").click(); }
+        else if (e.key === "ArrowLeft") { document.getElementById("mock-prev").click(); }
       }
     }
   });
@@ -1525,10 +1949,42 @@
     container.innerHTML = summaryHtml + strengthsHtml + rowsHtml;
   }
 
+  function sessionModeLabel(mode) {
+    if (mode === "wrong-review") return "오답 복습";
+    if (mode === "mock-exam") return "모의고사";
+    return "퀴즈";
+  }
+
+  function renderSessionLog() {
+    const container = document.getElementById("session-log-list");
+    if (!container) return;
+    const log = loadSessionLog();
+    if (log.length === 0) {
+      container.innerHTML = '<p class="hint">아직 응시 기록이 없어요.</p>';
+      return;
+    }
+    container.innerHTML = log
+      .map((entry) => {
+        const date = new Date(entry.at);
+        const dateLabel = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+        const topicText = entry.topic === "all" ? "전체" : topicLabel(entry.topic);
+        return `
+          <div class="session-log-row">
+            <span class="session-log-date">${dateLabel}</span>
+            <span class="session-log-mode">${sessionModeLabel(entry.mode)}</span>
+            <span class="session-log-topic">${topicText}</span>
+            <span class="session-log-score">${entry.correct}/${entry.count} (${entry.pct}%)</span>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
   function renderProgress() {
     const quizHistory = loadQuizHistory();
     renderLearningAnalysis(quizHistory);
     renderTopicMastery(quizHistory);
+    renderSessionLog();
     const data = loadProgress();
     const container = document.getElementById("progress-days");
     const overviewEl = document.getElementById("day-overview");
