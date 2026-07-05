@@ -2643,6 +2643,113 @@
     renderProgressHeadlineStats();
   });
 
+  // 사용자가 정한 "학습 계획 시작일" — 10일 계획의 어느 Day가 오늘에 해당하는지, 지연 여부를 판단하는 기준.
+  // PLAN_DAYS 자체에는 날짜 개념이 전혀 없으므로(순서만 있는 프로세) 이 설정이 있어야만 날짜 관련 기능이 켜진다.
+  const STUDY_PLAN_START_KEY = "az900-plan-start-v1";
+  function loadStudyPlanStart() {
+    return localStorage.getItem(STUDY_PLAN_START_KEY) || null;
+  }
+  function saveStudyPlanStart(v) {
+    if (!v) localStorage.removeItem(STUDY_PLAN_START_KEY);
+    else localStorage.setItem(STUDY_PLAN_START_KEY, v);
+  }
+  // 시작일 기준으로 "오늘"이 몇 번째 Day에 해당하는지(1-indexed). 시작 전이면 0 이하, 계획 기간(10일)을 넘으면 11 이상을 반환한다.
+  function computeCurrentPlanDay(startDateStr) {
+    if (!startDateStr) return null;
+    const start = new Date(startDateStr + "T00:00:00");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.round((today - start) / (1000 * 60 * 60 * 24)) + 1;
+  }
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#plan-start-save")) return;
+    const input = document.getElementById("plan-start-input");
+    saveStudyPlanStart(input.value || null);
+    renderStudyPlan();
+  });
+
+  // 커스텀 메모 — PLAN_DAYS 항목은 고정된 문자열이라 이동/삭제가 불가능하므로, 사용자가 직접 추가하는 항목만
+  // Day 사이를 옮기거나 지울 수 있다. { [day]: [{id, text, checked}] } 형태로 저장한다.
+  const PLAN_NOTES_KEY = "az900-plan-notes-v1";
+  function loadPlanNotes() {
+    try {
+      return JSON.parse(localStorage.getItem(PLAN_NOTES_KEY)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function savePlanNotes(notes) {
+    localStorage.setItem(PLAN_NOTES_KEY, JSON.stringify(notes));
+  }
+  function makeNoteId() {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+  function addPlanNote(day, text) {
+    const notes = loadPlanNotes();
+    notes[day] = notes[day] || [];
+    notes[day].push({ id: makeNoteId(), text, checked: false });
+    savePlanNotes(notes);
+  }
+  function togglePlanNote(day, noteId, checked) {
+    const notes = loadPlanNotes();
+    const note = (notes[day] || []).find((n) => n.id === noteId);
+    if (note) note.checked = checked;
+    savePlanNotes(notes);
+  }
+  function deletePlanNote(day, noteId) {
+    const notes = loadPlanNotes();
+    notes[day] = (notes[day] || []).filter((n) => n.id !== noteId);
+    savePlanNotes(notes);
+  }
+  function movePlanNoteToNextDay(day, noteId) {
+    if (day >= 10) return;
+    const notes = loadPlanNotes();
+    const list = notes[day] || [];
+    const idx = list.findIndex((n) => n.id === noteId);
+    if (idx === -1) return;
+    const [note] = list.splice(idx, 1);
+    notes[day + 1] = notes[day + 1] || [];
+    notes[day + 1].push(note);
+    savePlanNotes(notes);
+  }
+  document.addEventListener("click", (e) => {
+    const addBtn = e.target.closest("[data-note-add]");
+    if (addBtn) {
+      const day = Number(addBtn.dataset.noteAdd);
+      const input = document.querySelector(`.day-note-input[data-day="${day}"]`);
+      const text = input.value.trim();
+      if (!text) return;
+      addPlanNote(day, text);
+      renderStudyPlan();
+      return;
+    }
+    const deleteBtn = e.target.closest("[data-note-delete]");
+    if (deleteBtn) {
+      deletePlanNote(Number(deleteBtn.dataset.day), deleteBtn.dataset.noteDelete);
+      renderStudyPlan();
+      return;
+    }
+    const deferBtn = e.target.closest("[data-note-defer]");
+    if (deferBtn) {
+      movePlanNoteToNextDay(Number(deferBtn.dataset.day), deferBtn.dataset.noteDefer);
+      renderStudyPlan();
+      return;
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const input = e.target.closest(".day-note-input");
+    if (!input) return;
+    e.preventDefault();
+    document.querySelector(`[data-note-add="${input.dataset.day}"]`).click();
+  });
+  document.addEventListener("change", (e) => {
+    const cb = e.target.closest("[data-note-toggle]");
+    if (!cb) return;
+    togglePlanNote(Number(cb.dataset.day), cb.dataset.noteToggle, cb.checked);
+    renderStudyPlan();
+  });
+
   // 진행 상황 탭 상단에 항상 보이는 헤드라인 지표(연속 학습일 스트릭 + 시험 D-day) — 서브탭과 무관하게 노출.
   function renderProgressHeadlineStats() {
     const container = document.getElementById("progress-headline-stats");
@@ -2967,6 +3074,19 @@
     renderStudyPlan();
   }
 
+  // 항목 문구를 보고 대략적인 예상 소요 시간(분)을 매긴다 — 정밀한 값이 아니라 하루 총량을 가늠하는 용도.
+  function estimateItemMinutes(itemText) {
+    if (/종합\s*모의고사/.test(itemText)) return 50;
+    if (/플래시카드/.test(itemText)) return 15;
+    if (/퀴즈/.test(itemText)) return 20;
+    return 20;
+  }
+
+  // 퀴즈 결과/진행 상황 탭과 동일한 기준(classifyTopicStatus)으로 지금 실제 약점인 주제만 골라낸다.
+  function computeWeakTopicLabels(quizHistory) {
+    return TOPICS.filter((t) => classifyTopicStatus(computeTopicStats(t, quizHistory).quizPct) === "weak").map((t) => t.label);
+  }
+
   // 체크리스트 문구에서 이미 추적 중인 신호(플래시카드 암기/퀴즈 점수/모의고사 점수)를 감지해 자동 체크 여부를 판단한다.
   // 해당 신호가 없는 일반 항목은 null을 반환해 기존처럼 수동 체크로 남긴다.
   function detectAutoCheck(itemText, quizHistory) {
@@ -3027,6 +3147,21 @@
     container.innerHTML = streakHtml + badgeHtml;
   }
 
+  // 학습 시작일 설정 UI — 이 값이 있어야 "오늘" 배지/지연 감지/오늘의 학습 카드가 전부 켜진다.
+  function renderStudyPlanStartSetting() {
+    const container = document.getElementById("studyplan-start-setting");
+    if (!container) return;
+    const startDate = loadStudyPlanStart();
+    container.innerHTML = `
+      <div class="analysis-goal-row">
+        <label for="plan-start-input">📅 학습 시작일</label>
+        <input type="date" id="plan-start-input" value="${startDate || ""}">
+        <button class="btn-sm" type="button" id="plan-start-save">저장</button>
+        <span class="hint" style="margin:0;">(설정하면 오늘 해야 할 Day와 지연 여부를 알려줘요)</span>
+      </div>
+    `;
+  }
+
   // 사용자가 이번 세션에서 직접 접었다 펼친 Day — 지정하지 않은 Day는 완료 여부(100%)로 기본값이 정해진다.
   const studyPlanCollapseOverride = {};
   // 학습 계획을 완전히 끝낸 순간(0→100% 전환)에만 한 번 축하하기 위한 이전 렌더의 전체 진행률.
@@ -3035,43 +3170,124 @@
   function renderStudyPlan() {
     const quizHistory = loadQuizHistory();
     renderStudyPlanHeadlineStats(quizHistory);
+    renderStudyPlanStartSetting();
     const data = loadProgress();
     const container = document.getElementById("progress-days");
     const overviewEl = document.getElementById("day-overview");
     container.innerHTML = "";
     overviewEl.innerHTML = "";
 
+    const startDate = loadStudyPlanStart();
+    const currentPlanDay = computeCurrentPlanDay(startDate);
+
     // 1단계: 모든 Day의 체크 상태를 먼저 계산한다 — "건너뛴 Day" 판정(이후 Day에 진도가 있는데 이 Day만 0%)은
     // 실제 달력 날짜 없이도 이 전체 배열을 봐야 알 수 있기 때문에, DOM을 그리기 전에 한 번에 계산해 둔다.
+    // 사용자가 추가한 커스텀 메모도 일반 항목과 동일하게 진행률에 포함시킨다(별도 취급하면 숫자가 안 맞아 보인다).
+    const planNotes = loadPlanNotes();
     const dayStats = PLAN_DAYS.map((day) => {
-      const itemChecks = day.items.map((itemText, idx) => {
+      const builtinChecks = day.items.map((itemText, idx) => {
         const auto = detectAutoCheck(itemText, quizHistory);
         const manual = !!data[`${day.day}-${idx}`];
-        return { itemText, auto, checked: auto ? auto.checked || manual : manual };
+        return { itemText, auto, checked: auto ? auto.checked || manual : manual, isNote: false };
       });
+      const noteChecks = (planNotes[day.day] || []).map((note) => ({
+        itemText: note.text,
+        auto: null,
+        checked: !!note.checked,
+        isNote: true,
+        noteId: note.id,
+      }));
+      const itemChecks = builtinChecks.concat(noteChecks);
       const dayChecked = itemChecks.filter((c) => c.checked).length;
-      const dayPct = Math.round((dayChecked / day.items.length) * 100);
-      return { day, itemChecks, dayChecked, dayPct };
+      const dayPct = Math.round((dayChecked / itemChecks.length) * 100);
+      const totalMinutes = itemChecks.reduce((sum, c) => sum + estimateItemMinutes(c.itemText), 0);
+      return { day, itemChecks, dayChecked, dayPct, totalMinutes };
     });
     dayStats.forEach((stat, idx) => {
       stat.skipped = stat.dayPct === 0 && dayStats.slice(idx + 1).some((later) => later.dayPct > 0);
+      stat.isToday = currentPlanDay !== null && stat.day.day === currentPlanDay;
     });
 
     let totalItems = 0;
     let checkedItems = 0;
     dayStats.forEach((stat) => {
-      totalItems += stat.day.items.length;
+      totalItems += stat.itemChecks.length;
       checkedItems += stat.dayChecked;
     });
 
-    dayStats.forEach(({ day, itemChecks, dayChecked, dayPct, skipped }) => {
+    // 지연 감지: 오늘이 몇 번째 Day인지 알 때만 의미가 있다 — 시작일 이전 Day들 중 아직 100%가 아닌 게 몇 개인지.
+    const overdueDays = currentPlanDay !== null ? dayStats.filter((s) => s.day.day < currentPlanDay && s.dayPct < 100) : [];
+    const delayBannerEl = document.getElementById("studyplan-delay-banner");
+    if (delayBannerEl) {
+      delayBannerEl.innerHTML =
+        currentPlanDay !== null && currentPlanDay > 1 && overdueDays.length > 0
+          ? `<div class="analysis-wrong-summary">⏰ 계획보다 <strong>${overdueDays.length}일</strong> 지연됐어요 (Day ${overdueDays.map((s) => s.day.day).join(", ")} 미완료)</div>`
+          : "";
+    }
+
+    // D-day 페이스 비교 — 시험일(Progress 탭에서 설정)까지 남은 날보다 아직 안 끝낸 Day 수가 많으면 경고.
+    const paceWarningEl = document.getElementById("studyplan-pace-warning");
+    if (paceWarningEl) {
+      const dday = computeDday(loadExamDate());
+      const incompleteDaysCount = dayStats.filter((s) => s.dayPct < 100).length;
+      paceWarningEl.innerHTML =
+        dday !== null && dday >= 0 && incompleteDaysCount > dday
+          ? `<div class="analysis-wrong-summary">📐 남은 학습 <strong>${incompleteDaysCount}일</strong> 분량이 시험까지 남은 <strong>${dday}일</strong>보다 많아요. 페이스를 올려야 해요!</div>`
+          : "";
+    }
+
+    // 오늘의 학습 미리보기 — 10개 Day 카드를 스크롤해서 찾지 않아도 오늘 할 일을 바로 볼 수 있게.
+    const todayCardEl = document.getElementById("studyplan-today-card");
+    if (todayCardEl) {
+      const todayStat = currentPlanDay !== null ? dayStats.find((s) => s.day.day === currentPlanDay) : undefined;
+      if (!todayStat) {
+        todayCardEl.innerHTML =
+          currentPlanDay !== null && currentPlanDay > 10
+            ? `<div class="today-plan-card">🏁 10일 계획 기간이 지났어요. 아래에서 남은 항목을 마저 확인해보세요.</div>`
+            : "";
+      } else {
+        const itemsHtml = todayStat.itemChecks
+          .map((c) => `<li class="${c.checked ? "today-plan-item-done" : ""}">${c.itemText}</li>`)
+          .join("");
+        todayCardEl.innerHTML = `
+          <div class="today-plan-card">
+            <h4>📌 오늘은 Day ${todayStat.day.day} · ${todayStat.day.title} (${todayStat.dayChecked}/${todayStat.itemChecks.length})</h4>
+            <ul class="today-plan-items">${itemsHtml}</ul>
+            <button class="btn-sm" type="button" data-scroll-to-day="${todayStat.day.day}">Day ${todayStat.day.day} 카드로 이동</button>
+          </div>
+        `;
+      }
+    }
+
+    // 지연된 항목 모아보기 — "며칠 지연"이라는 숫자보다 실제로 뭘 해야 하는지가 더 실행 가능한 정보다.
+    const overdueItemsEl = document.getElementById("studyplan-overdue-items");
+    if (overdueItemsEl) {
+      const overdueItems = overdueDays.flatMap((s) =>
+        s.itemChecks
+          .map((c, idx) => ({ ...c, day: s.day, idx }))
+          .filter((c) => !c.checked)
+      );
+      overdueItemsEl.innerHTML =
+        overdueItems.length > 0
+          ? `
+            <details class="overdue-items-details">
+              <summary>⏳ 지연된 항목 ${overdueItems.length}개</summary>
+              ${overdueItems
+                .map((c) => `<div class="overdue-item-row"><span class="overdue-item-day">Day ${c.day.day}</span>${c.itemText}<button class="btn-sm" type="button" data-scroll-to-day="${c.day.day}">이동</button></div>`)
+                .join("")}
+            </details>
+          `
+          : "";
+    }
+
+    dayStats.forEach(({ day, itemChecks, dayChecked, dayPct, skipped, isToday, totalMinutes }) => {
       const dColor = domainColor(day.domain);
 
       // 상단 10일 미니 오버뷰 (클릭 시 해당 일차로 스크롤) — 모바일에서 탭하기 편하도록 칩뿐 아니라
       // 위아래 라벨을 포함한 칼럼 전체를 탭 영역으로 잡는다.
       const col = document.createElement("div");
       col.className = "day-col";
-      col.title = `Day ${day.day}: ${dayChecked}/${day.items.length}`;
+      col.title = `Day ${day.day}: ${dayChecked}/${itemChecks.length}`;
       col.addEventListener("click", () => {
         const target = document.getElementById(`day-card-${day.day}`);
         if (!target) return;
@@ -3096,23 +3312,29 @@
       // 일차 카드
       const isCollapsed = studyPlanCollapseOverride[day.day] !== undefined ? studyPlanCollapseOverride[day.day] : dayPct === 100;
       const card = document.createElement("div");
-      card.className = "day-card" + (isCollapsed ? " day-card-collapsed" : "") + (skipped ? " day-card-skipped" : "");
+      card.className =
+        "day-card" +
+        (isCollapsed ? " day-card-collapsed" : "") +
+        (skipped ? " day-card-skipped" : "") +
+        (isToday ? " day-card-today" : "");
       card.id = `day-card-${day.day}`;
 
       const head = document.createElement("div");
       head.className = "day-card-head";
       const skippedBadge = skipped ? `<span class="day-card-skipped-badge" title="이후 일차는 진행했는데 이 Day는 아직 0%예요">건너뜀?</span>` : "";
+      const todayBadge = isToday ? `<span class="day-card-today-badge">오늘</span>` : "";
       head.innerHTML = `
-        <h3>${dotHtml(dColor)}Day ${day.day} · ${day.title}${skippedBadge}</h3>
+        <h3>${dotHtml(dColor)}Day ${day.day} · ${day.title}${todayBadge}${skippedBadge}</h3>
         <div class="meter-row" style="margin-bottom:0;">
           <div class="meter" role="progressbar" aria-label="Day ${day.day} 진행률"><div class="meter-fill" style="width:${dayPct}%"></div></div>
-          <span class="meter-label">${dayChecked}/${day.items.length}</span>
+          <span class="meter-label">${dayChecked}/${itemChecks.length}</span>
         </div>
+        <span class="day-card-est-time">약 ${totalMinutes}분</span>
         <button class="day-card-toggle" type="button" data-day="${day.day}" aria-label="${isCollapsed ? "펼치기" : "접기"}">${isCollapsed ? "▸" : "▾"}</button>
       `;
       card.appendChild(head);
 
-      itemChecks.forEach(({ itemText, auto, checked }, idx) => {
+      itemChecks.forEach(({ itemText, auto, checked, isNote, noteId }, idx) => {
         const itemKey = `${day.day}-${idx}`;
 
         const itemRow = document.createElement("div");
@@ -3123,7 +3345,10 @@
         const cb = document.createElement("input");
         cb.type = "checkbox";
         cb.checked = checked;
-        if (auto) {
+        if (isNote) {
+          cb.dataset.noteToggle = noteId;
+          cb.dataset.day = day.day;
+        } else if (auto) {
           cb.disabled = true;
           itemLabel.classList.add("day-item-auto");
           itemLabel.title = auto.reason;
@@ -3137,6 +3362,15 @@
         }
         itemLabel.appendChild(cb);
         itemLabel.appendChild(document.createTextNode(itemText));
+
+        // "취약 주제 재학습"은 고정 문구지만, 실제로 지금 약점인 주제를 옆에 보여주면 훨씬 실행 가능해진다.
+        if (itemText === "취약 주제 재학습") {
+          const weakLabels = computeWeakTopicLabels(quizHistory);
+          const weakStatEl = document.createElement("span");
+          weakStatEl.className = "day-item-stat";
+          weakStatEl.textContent = weakLabels.length ? ` (현재: ${weakLabels.join(", ")})` : " (현재 약점 주제 없음 🎉)";
+          itemLabel.appendChild(weakStatEl);
+        }
 
         // "플래시카드 'X'" / "퀴즈 'X'" 문장을 감지해 해당 기능으로 바로가는 버튼을 붙이고,
         // 체크 여부와 무관하게 지금 실제 진행 상황(암기율/최근 점수)도 함께 보여준다.
@@ -3176,11 +3410,40 @@
           autoBadge.textContent = "🤖";
           itemLabel.appendChild(autoBadge);
         }
+        if (isNote) itemLabel.classList.add("day-item-note");
         itemRow.appendChild(itemLabel);
         if (jumpBtn) itemRow.appendChild(jumpBtn);
 
+        if (isNote) {
+          if (day.day < 10) {
+            const deferBtn = document.createElement("button");
+            deferBtn.className = "btn-sm day-item-jump";
+            deferBtn.type = "button";
+            deferBtn.textContent = "다음날로 →";
+            deferBtn.dataset.day = day.day;
+            deferBtn.dataset.noteDefer = noteId;
+            itemRow.appendChild(deferBtn);
+          }
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "btn-sm day-item-jump day-item-note-delete";
+          deleteBtn.type = "button";
+          deleteBtn.textContent = "삭제";
+          deleteBtn.dataset.day = day.day;
+          deleteBtn.dataset.noteDelete = noteId;
+          itemRow.appendChild(deleteBtn);
+        }
+
         card.appendChild(itemRow);
       });
+
+      // 개인 메모 추가 — PLAN_DAYS의 고정 항목과 달리 사용자가 자유롭게 넣고 지우고 다음날로 옮길 수 있다.
+      const addNoteRow = document.createElement("div");
+      addNoteRow.className = "day-note-add-row";
+      addNoteRow.innerHTML = `
+        <input type="text" class="day-note-input" data-day="${day.day}" placeholder="개인 메모 추가...">
+        <button class="btn-sm" type="button" data-note-add="${day.day}">추가</button>
+      `;
+      card.appendChild(addNoteRow);
 
       container.appendChild(card);
     });
@@ -3203,6 +3466,22 @@
     const currentlyCollapsed = card ? card.classList.contains("day-card-collapsed") : false;
     studyPlanCollapseOverride[dayNum] = !currentlyCollapsed;
     renderStudyPlan();
+  });
+
+  // "오늘의 학습"/"지연된 항목" 카드에서 특정 Day 카드로 이동 — 접혀 있으면 펼친 뒤 스크롤한다.
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-scroll-to-day]");
+    if (!btn) return;
+    const dayNum = Number(btn.dataset.scrollToDay);
+    studyPlanCollapseOverride[dayNum] = false;
+    renderStudyPlan();
+    requestAnimationFrame(() => {
+      const target = document.getElementById(`day-card-${dayNum}`);
+      if (!target) return;
+      target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
+      target.classList.add("pulse");
+      setTimeout(() => target.classList.remove("pulse"), 900);
+    });
   });
 
   // 어느 탭에 있든 항상 보이는 "다음 학습 단계" 한 줄 안내 — renderLearningAnalysis와 동일한 우선순위 로직의 1순위만 노출.
