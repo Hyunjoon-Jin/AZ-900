@@ -1470,6 +1470,7 @@ button {
 .day-card .meter { width: 70px; }
 .day-card-head .meter-label { font-size: 0.75rem; }
 .day-card-est-time { font-size: 0.75rem; color: var(--text-muted); flex-shrink: 0; }
+.day-card-suggested-date { font-size: 0.75rem; color: var(--accent); flex-shrink: 0; }
 .day-card-toggle {
   border: none;
   background: none;
@@ -1501,6 +1502,7 @@ button {
 .day-card label.checked { color: var(--text-muted); text-decoration: line-through; }
 .day-item-jump { flex-shrink: 0; }
 .day-item-stat { color: var(--text-muted); font-size: 0.85rem; }
+.day-item-preview { color: var(--accent); font-style: italic; }
 .day-item-note-delete { color: var(--critical); }
 .day-card label.day-item-note { font-style: italic; }
 .day-note-add-row {

@@ -2481,6 +2481,17 @@
     };
   }
 
+  // 아직 안 끝낸 "목표 %" 퀴즈 항목을 목표대로 끝내면 전체 누적 점수가 대략 얼마나 오르는지 미리 보여준다.
+  // 실제로 몇 문항이 나올지는 모르니 대표값(10문항)으로 가정한 근사치 — 정확한 수치가 아니라 방향성 힌트다.
+  const READINESS_PREVIEW_ASSUMED_COUNT = 10;
+  function computeReadinessPreview(quizHistory, targetPct) {
+    const current = computeOverallReadiness(quizHistory) || { correct: 0, total: 0, scaledScore: 0 };
+    const addCorrect = Math.round((READINESS_PREVIEW_ASSUMED_COUNT * targetPct) / 100);
+    const newTotal = current.total + READINESS_PREVIEW_ASSUMED_COUNT;
+    const newScore = Math.round(((current.correct + addCorrect) / newTotal) * 1000);
+    return { newScore, delta: newScore - current.scaledScore };
+  }
+
   // 실제 시험의 3개 도메인 기준으로 주제별 누적 통계를 묶어서 보여준다(모의고사와 동일한 도메인 구분).
   function computeDomainBreakdown(quizHistory) {
     const byDomain = {};
@@ -2667,6 +2678,49 @@
     saveStudyPlanStart(input.value || null);
     renderStudyPlan();
   });
+
+  function formatMonthDay(date) {
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+  }
+  // 각 Day에 "언제 하면 좋은지"를 안내한다. 페이스가 정상이면 시작일+ (Day-1), 이미 밀렸다면(페이스 경고 상태)
+  // 아직 안 끝낸 Day들을 오늘~시험일 사이에 고르게 재배치해서 보여준다 — PLAN_DAYS 자체를 바꾸지 않고
+  // 화면에만 나타나는 "제안"이라 학습자가 언제든 무시해도 된다.
+  function computeSuggestedDates(dayStats, startDateStr, examDateStr) {
+    if (!startDateStr) return {};
+    const start = new Date(startDateStr + "T00:00:00");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dday = computeDday(examDateStr);
+    const incompleteStats = dayStats.filter((s) => s.dayPct < 100);
+    const squeezed = dday !== null && dday >= 0 && incompleteStats.length > dday;
+
+    const suggested = {};
+    if (!squeezed) {
+      dayStats.forEach((s) => {
+        const d = new Date(start);
+        d.setDate(d.getDate() + (s.day.day - 1));
+        suggested[s.day.day] = formatMonthDay(d);
+      });
+      return suggested;
+    }
+
+    // 페이스가 밀렸을 때: 이미 끝낸 Day는 원래 날짜 그대로 두고, 남은 Day들만 오늘부터 시험일까지 고르게 나눈다.
+    dayStats.forEach((s) => {
+      if (s.dayPct >= 100) {
+        const d = new Date(start);
+        d.setDate(d.getDate() + (s.day.day - 1));
+        suggested[s.day.day] = formatMonthDay(d);
+      }
+    });
+    const span = Math.max(dday, 1);
+    incompleteStats.forEach((s, i) => {
+      const d = new Date(today);
+      const offset = incompleteStats.length > 1 ? Math.round((i * span) / (incompleteStats.length - 1)) : 0;
+      d.setDate(d.getDate() + offset);
+      suggested[s.day.day] = formatMonthDay(d);
+    });
+    return suggested;
+  }
 
   // 커스텀 메모 — PLAN_DAYS 항목은 고정된 문자열이라 이동/삭제가 불가능하므로, 사용자가 직접 추가하는 항목만
   // Day 사이를 옮기거나 지울 수 있다. { [day]: [{id, text, checked}] } 형태로 저장한다.
@@ -3087,17 +3141,34 @@
     return TOPICS.filter((t) => classifyTopicStatus(computeTopicStats(t, quizHistory).quizPct) === "weak").map((t) => t.label);
   }
 
+  // Day 번호 → 그 Day가 주로 다루는 주제 키. Day 7(복습+모의고사)은 여러 주제가 섞여 있어 제외한다.
+  // PLAN_DAYS 항목 자체엔 주제 참조가 없으므로, Day 제목을 기준으로 사람이 직접 매핑해 둔 힌트다.
+  const DAY_TOPIC_HINT = {
+    1: "cloud-concepts",
+    2: "cloud-concepts",
+    3: "architecture",
+    4: "compute",
+    5: "networking",
+    6: "storage",
+    8: "identity-security",
+    9: "cost-governance",
+    10: "monitoring-tools",
+  };
+
   // 체크리스트 문구에서 이미 추적 중인 신호(플래시카드 암기/퀴즈 점수/모의고사 점수)를 감지해 자동 체크 여부를 판단한다.
   // 해당 신호가 없는 일반 항목은 null을 반환해 기존처럼 수동 체크로 남긴다.
-  function detectAutoCheck(itemText, quizHistory) {
+  function detectAutoCheck(itemText, quizHistory, dayNumber) {
     const fcMatch = itemText.match(/플래시카드\s*'([^']+)'/);
     if (fcMatch) {
       const topic = TOPICS.find((t) => t.label === fcMatch[1]);
       if (!topic) return null;
-      const known = FLASHCARDS.filter((c) => c.topic === topic.key && mastered.has(c.id)).length;
+      const knownCards = FLASHCARDS.filter((c) => c.topic === topic.key && mastered.has(c.id));
+      const known = knownCards.length;
+      const latestAt = knownCards.reduce((max, c) => Math.max(max, masteredAt[c.id] || 0), 0);
+      const whenText = latestAt > 0 ? ` (${formatMonthDay(new Date(latestAt))})` : "";
       return {
         checked: known > 0,
-        reason: known > 0 ? `'${topic.label}' 플래시카드 ${known}장 암기 완료 기록 감지` : "이 주제 플래시카드를 암기 완료로 표시하면 자동 체크돼요",
+        reason: known > 0 ? `'${topic.label}' 플래시카드 ${known}장 암기 완료 기록 감지${whenText}` : "이 주제 플래시카드를 암기 완료로 표시하면 자동 체크돼요",
       };
     }
 
@@ -3108,8 +3179,9 @@
       const target = quizMatch[2] ? Number(quizMatch[2]) : null;
       const entry = quizHistory[topic.key];
       const met = !!entry && (target === null || entry.lastPct >= target);
+      const whenText = met && entry.lastAt ? ` (${formatMonthDay(new Date(entry.lastAt))})` : "";
       const reason = met
-        ? `'${topic.label}' 퀴즈 최근 점수 ${entry.lastPct}% 감지`
+        ? `'${topic.label}' 퀴즈 최근 점수 ${entry.lastPct}% 감지${whenText}`
         : target !== null
         ? `이 주제 퀴즈에서 ${target}% 이상 받으면 자동 체크돼요`
         : "이 주제 퀴즈를 한 번 풀면 자동 체크돼요";
@@ -3120,12 +3192,28 @@
       const targetMatch = itemText.match(/목표\s*(\d+)%/);
       const target = targetMatch ? Number(targetMatch[1]) : null;
       const qualifying = loadMockExamHistory().find((h) => target === null || h.score >= target * 10);
+      const whenText = qualifying && qualifying.at ? ` (${formatMonthDay(new Date(qualifying.at))})` : "";
       const reason = qualifying
-        ? `모의고사 ${qualifying.score}점 기록 감지`
+        ? `모의고사 ${qualifying.score}점 기록 감지${whenText}`
         : target !== null
         ? `모의고사에서 ${target}% (${target * 10}점) 이상 받으면 자동 체크돼요`
         : "모의고사를 한 번 치르면 자동 체크돼요";
       return { checked: !!qualifying, reason };
+    }
+
+    // 위 세 패턴(플래시카드/퀴즈/모의고사) 어디에도 안 걸린 일반 개념 항목 — 그 Day의 대표 주제 학습 자료를
+    // 절반 이상 읽었으면 "개념을 한 번 훑었다"로 간주해 부분 자동 체크한다. 힌트가 없는 Day(복습/모의고사 중심)는 대상 아님.
+    // 아직 절반을 못 읽었을 땐 null을 반환해 기존처럼 수동 체크 가능한 상태로 남겨둔다 — 플래시카드/퀴즈/모의고사
+    // 패턴과 달리 이 항목들은 원래 전부 수동이었으므로, 조건을 만족하기 전까지 상호작용을 뺏지 않기 위함이다.
+    const hintKey = DAY_TOPIC_HINT[dayNumber];
+    if (hintKey) {
+      const topic = TOPICS.find((t) => t.key === hintKey);
+      if (topic) {
+        const readPct = computeTopicStats(topic, quizHistory).readPct;
+        if (readPct >= 50) {
+          return { checked: true, reason: `'${topic.label}' 학습 자료 ${readPct}% 읽음 감지` };
+        }
+      }
     }
 
     return null;
@@ -3144,8 +3232,41 @@
     const badges = computeBadges(quizHistory);
     const earnedCount = badges.filter((b) => b.earned).length;
     const badgeHtml = `<span class="headline-stat"><button class="link-btn" type="button" data-goto-tab="progress">🏅 배지 ${earnedCount}/${badges.length}개 달성 →</button></span>`;
-    container.innerHTML = streakHtml + badgeHtml;
+    const shareHtml = `<span class="headline-stat"><button class="btn-sm" type="button" id="studyplan-share-btn">📋 진행 상황 공유</button></span>`;
+    container.innerHTML = streakHtml + badgeHtml + shareHtml;
   }
+
+  // 클립보드 API가 없는 환경(비보안 컨텍스트 등)에서도 동작하도록 textarea+execCommand로 대체한다.
+  function copyTextToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand("copy");
+    } finally {
+      document.body.removeChild(textarea);
+    }
+    return Promise.resolve();
+  }
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("#studyplan-share-btn");
+    if (!btn) return;
+    const summary = buildStudyPlanShareSummary();
+    const originalText = btn.textContent;
+    copyTextToClipboard(summary).then(() => {
+      btn.textContent = "✅ 복사됨!";
+      setTimeout(() => {
+        btn.textContent = originalText;
+      }, 1500);
+    });
+  });
 
   // 학습 시작일 설정 UI — 이 값이 있어야 "오늘" 배지/지연 감지/오늘의 학습 카드가 전부 켜진다.
   function renderStudyPlanStartSetting() {
@@ -3167,26 +3288,15 @@
   // 학습 계획을 완전히 끝낸 순간(0→100% 전환)에만 한 번 축하하기 위한 이전 렌더의 전체 진행률.
   let prevStudyPlanPct = null;
 
-  function renderStudyPlan() {
-    const quizHistory = loadQuizHistory();
-    renderStudyPlanHeadlineStats(quizHistory);
-    renderStudyPlanStartSetting();
+  // Day별 체크 상태 계산 — renderStudyPlan()과 공유용 요약(클립보드 복사)에서 동일한 숫자를 써야 하므로 공용 함수로 뺐다.
+  // "건너뛴 Day" 판정(이후 Day에 진도가 있는데 이 Day만 0%)은 실제 달력 날짜 없이도 전체 배열을 봐야 알 수 있어
+  // 두 단계로 나눠 계산한다. 사용자가 추가한 커스텀 메모도 일반 항목과 동일하게 진행률에 포함시킨다.
+  function computeStudyPlanDayStats(quizHistory, currentPlanDay) {
     const data = loadProgress();
-    const container = document.getElementById("progress-days");
-    const overviewEl = document.getElementById("day-overview");
-    container.innerHTML = "";
-    overviewEl.innerHTML = "";
-
-    const startDate = loadStudyPlanStart();
-    const currentPlanDay = computeCurrentPlanDay(startDate);
-
-    // 1단계: 모든 Day의 체크 상태를 먼저 계산한다 — "건너뛴 Day" 판정(이후 Day에 진도가 있는데 이 Day만 0%)은
-    // 실제 달력 날짜 없이도 이 전체 배열을 봐야 알 수 있기 때문에, DOM을 그리기 전에 한 번에 계산해 둔다.
-    // 사용자가 추가한 커스텀 메모도 일반 항목과 동일하게 진행률에 포함시킨다(별도 취급하면 숫자가 안 맞아 보인다).
     const planNotes = loadPlanNotes();
     const dayStats = PLAN_DAYS.map((day) => {
       const builtinChecks = day.items.map((itemText, idx) => {
-        const auto = detectAutoCheck(itemText, quizHistory);
+        const auto = detectAutoCheck(itemText, quizHistory, day.day);
         const manual = !!data[`${day.day}-${idx}`];
         return { itemText, auto, checked: auto ? auto.checked || manual : manual, isNote: false };
       });
@@ -3207,6 +3317,41 @@
       stat.skipped = stat.dayPct === 0 && dayStats.slice(idx + 1).some((later) => later.dayPct > 0);
       stat.isToday = currentPlanDay !== null && stat.day.day === currentPlanDay;
     });
+    return dayStats;
+  }
+
+  // 학습 현황을 텍스트 한 줄로 요약 — 스터디 그룹/메신저에 붙여넣기 좋게 클립보드로 복사하는 용도.
+  function buildStudyPlanShareSummary() {
+    const quizHistory = loadQuizHistory();
+    const startDate = loadStudyPlanStart();
+    const currentPlanDay = computeCurrentPlanDay(startDate);
+    const dayStats = computeStudyPlanDayStats(quizHistory, currentPlanDay);
+    const completedDays = dayStats.filter((s) => s.dayPct === 100).length;
+    const totalItems = dayStats.reduce((sum, s) => sum + s.itemChecks.length, 0);
+    const checkedItems = dayStats.reduce((sum, s) => sum + s.dayChecked, 0);
+    const pct = totalItems ? Math.round((checkedItems / totalItems) * 100) : 0;
+    const streak = computeStreak();
+    const lines = [
+      `📚 AZ-900 학습 현황`,
+      `완료 Day: ${completedDays}/10일 (전체 항목 ${pct}%, ${checkedItems}/${totalItems})`,
+    ];
+    if (currentPlanDay !== null) lines.push(`오늘: Day ${currentPlanDay}${currentPlanDay >= 1 && currentPlanDay <= 10 ? "" : " (계획 기간 밖)"}`);
+    lines.push(streak > 0 ? `🔥 ${streak}일 연속 학습 중` : "오늘부터 연속 학습 시작 가능");
+    return lines.join("\n");
+  }
+
+  function renderStudyPlan() {
+    const quizHistory = loadQuizHistory();
+    renderStudyPlanHeadlineStats(quizHistory);
+    renderStudyPlanStartSetting();
+    const container = document.getElementById("progress-days");
+    const overviewEl = document.getElementById("day-overview");
+    container.innerHTML = "";
+    overviewEl.innerHTML = "";
+
+    const startDate = loadStudyPlanStart();
+    const currentPlanDay = computeCurrentPlanDay(startDate);
+    const dayStats = computeStudyPlanDayStats(quizHistory, currentPlanDay);
 
     let totalItems = 0;
     let checkedItems = 0;
@@ -3235,6 +3380,9 @@
           ? `<div class="analysis-wrong-summary">📐 남은 학습 <strong>${incompleteDaysCount}일</strong> 분량이 시험까지 남은 <strong>${dday}일</strong>보다 많아요. 페이스를 올려야 해요!</div>`
           : "";
     }
+
+    // Day별 추천 날짜 — 시작일이 있어야만 의미가 있고, 페이스가 밀린 경우 남은 Day를 오늘~시험일 사이로 재배치해 제안한다.
+    const suggestedDates = computeSuggestedDates(dayStats, startDate, loadExamDate());
 
     // 오늘의 학습 미리보기 — 10개 Day 카드를 스크롤해서 찾지 않아도 오늘 할 일을 바로 볼 수 있게.
     const todayCardEl = document.getElementById("studyplan-today-card");
@@ -3323,6 +3471,8 @@
       head.className = "day-card-head";
       const skippedBadge = skipped ? `<span class="day-card-skipped-badge" title="이후 일차는 진행했는데 이 Day는 아직 0%예요">건너뜀?</span>` : "";
       const todayBadge = isToday ? `<span class="day-card-today-badge">오늘</span>` : "";
+      const suggestedDate = suggestedDates[day.day];
+      const suggestedDateHtml = suggestedDate ? `<span class="day-card-suggested-date">📅 ${suggestedDate} 권장</span>` : "";
       head.innerHTML = `
         <h3>${dotHtml(dColor)}Day ${day.day} · ${day.title}${todayBadge}${skippedBadge}</h3>
         <div class="meter-row" style="margin-bottom:0;">
@@ -3330,6 +3480,7 @@
           <span class="meter-label">${dayChecked}/${itemChecks.length}</span>
         </div>
         <span class="day-card-est-time">약 ${totalMinutes}분</span>
+        ${suggestedDateHtml}
         <button class="day-card-toggle" type="button" data-day="${day.day}" aria-label="${isCollapsed ? "펼치기" : "접기"}">${isCollapsed ? "▸" : "▾"}</button>
       `;
       card.appendChild(head);
@@ -3402,6 +3553,17 @@
             jumpBtn.dataset.gotoTab = isFc ? "flashcards" : "quiz";
             jumpBtn.dataset.gotoTopic = targetTopic.key;
           }
+        }
+
+        // 목표 %가 명시된 퀴즈 항목은, 아직 완료 전이라면 그 목표대로 풀었을 때 전체 점수가 얼마나 오르는지 미리 보여준다.
+        const quizTargetMatch = itemText.match(/퀴즈\s*'([^']+)'\s*세트\s*풀이\s*\(목표\s*(\d+)%\+?\)/);
+        if (quizTargetMatch && !checked) {
+          const target = Number(quizTargetMatch[2]);
+          const preview = computeReadinessPreview(quizHistory, target);
+          const previewEl = document.createElement("span");
+          previewEl.className = "day-item-stat day-item-preview";
+          previewEl.textContent = ` (완료 시 예상 총점 약 ${preview.newScore}점, ${preview.delta >= 0 ? "+" : ""}${preview.delta})`;
+          itemLabel.appendChild(previewEl);
         }
 
         if (auto) {
