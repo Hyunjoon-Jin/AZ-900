@@ -186,6 +186,20 @@
     });
   });
 
+  // 챕터 테스트를 한 번이라도 치렀는지 추적 — 학습 순서 가이드의 3단계(챕터 테스트) 완료 여부에 쓰인다.
+  const CHAPTER_TESTED_KEY = "az900-chapter-tested-v1";
+  function loadTestedChapters() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(CHAPTER_TESTED_KEY)) || []);
+    } catch (e) {
+      return new Set();
+    }
+  }
+  function saveTestedChapters(set) {
+    localStorage.setItem(CHAPTER_TESTED_KEY, JSON.stringify(Array.from(set)));
+  }
+  let testedChapters = loadTestedChapters();
+
   function escapeHtml(str) {
     return str
       .replace(/&/g, "&amp;")
@@ -392,12 +406,12 @@
           level === 2
             ? `<button class="chapter-read-toggle" type="button" data-chapter-id="${id}" aria-pressed="false"><span class="chapter-read-check">${CHECK_ICON}</span><span class="chapter-read-label">읽음으로 표시</span></button>`
             : "";
-        // 세부 단원(챕터) 단위로도 언제든 테스트를 볼 수 있는 버튼 — 읽음 표시와 무관하게 항상 노출.
-        const quickTestBtn =
+        // 읽기→플래시카드→챕터 테스트 순서를 한눈에 보여주는 안내 바 — 내용은 applyChapterStepState()가 채운다.
+        const stepGuide =
           level === 2 && CHAPTER_TOPIC[id]
-            ? `<button class="chapter-quick-test" type="button" data-chapter-id="${id}">🎯 이 챕터 테스트</button>`
+            ? `<div class="chapter-step-guide" data-chapter-id="${id}"></div>`
             : "";
-        html += `<h${level} id="${id}"${headingClass}>${prefix}${mdInline(text)}${readToggle}${quickTestBtn}</h${level}>`;
+        html += `<h${level} id="${id}"${headingClass}>${prefix}${mdInline(text)}${readToggle}</h${level}>${stepGuide}`;
         if (level <= 2) toc.push({ level, id, text });
         i++;
         continue;
@@ -637,32 +651,80 @@
     });
   }
 
+  // 챕터마다 "읽기 → 플래시카드 → 챕터 테스트" 순서와 각 단계 완료 여부를 보여준다.
+  function applyChapterStepState(scopeEl) {
+    scopeEl.querySelectorAll(".chapter-step-guide[data-chapter-id]").forEach((guide) => {
+      const chapterId = guide.dataset.chapterId;
+      const topicKey = CHAPTER_TOPIC[chapterId];
+      if (!topicKey) return;
+
+      const isRead = readChapters.has(chapterId);
+      const fcCards = FLASHCARDS.filter((c) => c.topic === topicKey);
+      const fcKnown = fcCards.filter((c) => mastered.has(c.id)).length;
+      const fcPct = fcCards.length ? Math.round((fcKnown / fcCards.length) * 100) : 100;
+      const fcDone = fcPct >= 50;
+      const tested = testedChapters.has(chapterId);
+
+      let current = 1;
+      if (isRead) current = fcDone ? 3 : 2;
+
+      const steps = [
+        { n: 1, label: "읽기", done: isRead },
+        { n: 2, label: fcCards.length ? `플래시카드 (${fcKnown}/${fcCards.length})` : "플래시카드", done: fcDone },
+        { n: 3, label: "챕터 테스트", done: tested },
+      ];
+
+      guide.innerHTML = steps
+        .map((s, i) => {
+          const stateCls = s.done ? "chapter-step-done" : s.n === current ? "chapter-step-current" : "";
+          const icon = s.done ? CHECK_ICON : `<span class="chapter-step-num">${s.n}</span>`;
+          const arrow = i > 0 ? '<span class="chapter-step-arrow">→</span>' : "";
+          return `${arrow}<button class="chapter-step ${stateCls}" type="button" data-step="${s.n}" data-chapter-id="${chapterId}">${icon}${s.label}</button>`;
+        })
+        .join("");
+    });
+  }
+
+  // 읽음/안읽음 토글 + 그에 따른 배너 표시를 한 곳에 모아, 상단·하단 버튼과 학습 순서 가이드 1단계가 모두 재사용한다.
+  function toggleChapterRead(id) {
+    const wasRead = readChapters.has(id);
+    if (wasRead) readChapters.delete(id); else readChapters.add(id);
+    saveReadChapters(readChapters);
+    applyChapterReadState(materialsBodyEl);
+    applyChapterStepState(materialsBodyEl);
+    const cached = materialsCache[currentMaterialsDoc];
+    if (cached) renderMaterialsToc(cached.toc);
+    if (!wasRead && CHAPTER_TOPIC[id]) {
+      showChapterQuickCheckBanner(id);
+    } else if (wasRead) {
+      // 다시 안읽음으로 표시하면 그 챕터용 배너도 함께 지운다(더 이상 맥락에 안 맞으므로).
+      const h2 = document.getElementById(id);
+      const existingBanner = h2 && h2.nextElementSibling;
+      if (existingBanner && existingBanner.classList && existingBanner.classList.contains("chapter-quickcheck")) {
+        existingBanner.remove();
+      }
+    }
+  }
+
   if (materialsBodyEl) {
     materialsBodyEl.addEventListener("click", (e) => {
       const chapterBtn = e.target.closest(".chapter-read-toggle");
       if (chapterBtn) {
-        const id = chapterBtn.dataset.chapterId;
-        const wasRead = readChapters.has(id);
-        if (wasRead) readChapters.delete(id); else readChapters.add(id);
-        saveReadChapters(readChapters);
-        applyChapterReadState(materialsBodyEl);
-        const cached = materialsCache[currentMaterialsDoc];
-        if (cached) renderMaterialsToc(cached.toc);
-        if (!wasRead && CHAPTER_TOPIC[id]) {
-          showChapterQuickCheckBanner(id);
-        } else if (wasRead) {
-          // 다시 안읽음으로 표시하면 그 챕터용 배너도 함께 지운다(더 이상 맥락에 안 맞으므로).
-          const h2 = document.getElementById(id);
-          const existingBanner = h2 && h2.nextElementSibling;
-          if (existingBanner && existingBanner.classList && existingBanner.classList.contains("chapter-quickcheck")) {
-            existingBanner.remove();
-          }
-        }
+        toggleChapterRead(chapterBtn.dataset.chapterId);
         return;
       }
-      const quickTestBtn = e.target.closest(".chapter-quick-test");
-      if (quickTestBtn) {
-        startQuickCheckQuiz(quickTestBtn.dataset.chapterId);
+      const stepBtn = e.target.closest(".chapter-step[data-step]");
+      if (stepBtn) {
+        const chId = stepBtn.dataset.chapterId;
+        const step = stepBtn.dataset.step;
+        if (step === "1") toggleChapterRead(chId);
+        else if (step === "2") {
+          const topicKey = CHAPTER_TOPIC[chId];
+          applyTopicJump("flashcards", topicKey);
+          document.querySelector('.tab-btn[data-tab="flashcards"]').click();
+        } else if (step === "3") {
+          startQuickCheckQuiz(chId);
+        }
         return;
       }
       const navBtn = e.target.closest(".chapter-nav-btn[data-toc-target]");
@@ -724,7 +786,7 @@
     if (pool.length === 0) return;
     quizTopicSel.value = topicKey;
     document.querySelector('.tab-btn[data-tab="quiz"]').click();
-    startQuiz(shuffle(pool).slice(0, Math.min(QUICK_CHECK_SIZE, pool.length)));
+    startQuiz(shuffle(pool).slice(0, Math.min(QUICK_CHECK_SIZE, pool.length)), "chapter-check", chapterId);
   }
 
   function scrollToTopicChapter(topicKey) {
@@ -739,6 +801,7 @@
       body.innerHTML = materialsCache[docKey].html;
       renderMaterialsToc(materialsCache[docKey].toc);
       applyChapterReadState(body);
+      applyChapterStepState(body);
       if (scrollTopic) scrollToTopicChapter(scrollTopic);
       return;
     }
@@ -756,6 +819,7 @@
           body.innerHTML = result.html;
           renderMaterialsToc(result.toc);
           applyChapterReadState(body);
+          applyChapterStepState(body);
           if (scrollTopic) scrollToTopicChapter(scrollTopic);
         }
       })
@@ -1180,7 +1244,8 @@
   let quizScore = 0;
   let quizAnswered = false;
   let quizLog = [];
-  let quizSessionMode = "quiz"; // "quiz" | "wrong-review" | 응시 이력에 기록되는 세션 종류
+  let quizSessionMode = "quiz"; // "quiz" | "wrong-review" | "chapter-check" | 응시 이력에 기록되는 세션 종류
+  let quizChapterContext = null; // 챕터 단위 테스트로 시작된 경우 그 챕터 id — 결과 화면에서 "챕터 테스트 완료"로 기록하는 데 쓰인다.
 
   // 정답 위치를 무작위로 섞어 "항상 첫 번째가 정답"이 되지 않도록 함
   function shuffleOptions(item) {
@@ -1190,12 +1255,13 @@
     return Object.assign({}, item, { options, answer });
   }
 
-  function startQuiz(items, mode) {
+  function startQuiz(items, mode, chapterId) {
     quizDeck = items.map(shuffleOptions);
     quizIndex = 0;
     quizScore = 0;
     quizLog = [];
     quizSessionMode = mode || "quiz";
+    quizChapterContext = chapterId || null;
     quizSetup.classList.add("hidden");
     quizResult.classList.add("hidden");
     quizPlay.classList.remove("hidden");
@@ -1345,6 +1411,11 @@
       correct: quizScore,
       pct,
     });
+    if (quizChapterContext) {
+      testedChapters.add(quizChapterContext);
+      saveTestedChapters(testedChapters);
+      applyChapterStepState(materialsBodyEl);
+    }
     refreshWrongReviewButton();
     const breakdownEl = document.getElementById("quiz-topic-breakdown");
     breakdownEl.innerHTML = "";
@@ -1985,9 +2056,9 @@
 
   // 읽음%가 낮으면 교재부터, 암기%가 낮으면 플래시카드부터, 둘 다 괜찮으면 퀴즈로 실전 감각 점검을 추천한다.
   function recommendAction(readPct, fcPct) {
-    if (readPct < 50) return { action: "materials", label: "교재로", text: "교재를 먼저 읽어보세요" };
-    if (fcPct < 50) return { action: "flashcards", label: "플래시카드로", text: "플래시카드로 개념을 복습해보세요" };
-    return { action: "quiz", label: "퀴즈로", text: "퀴즈로 실전 감각을 점검해보세요" };
+    if (readPct < 50) return { action: "materials", label: "교재로", text: "1단계: 교재를 먼저 읽어보세요" };
+    if (fcPct < 50) return { action: "flashcards", label: "플래시카드로", text: "2단계: 플래시카드로 개념을 복습해보세요" };
+    return { action: "quiz", label: "퀴즈로", text: "3단계: 퀴즈로 실전 감각을 점검해보세요" };
   }
 
   // 주제별 누적 정답률을 모의고사와 동일한 1000점 환산 방식으로 합산한 전체 예상 준비도.
@@ -2120,6 +2191,7 @@
   function sessionModeLabel(mode) {
     if (mode === "wrong-review") return "오답 복습";
     if (mode === "mock-exam") return "모의고사";
+    if (mode === "chapter-check") return "챕터 테스트";
     return "퀴즈";
   }
 
