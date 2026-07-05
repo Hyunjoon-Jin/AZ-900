@@ -90,16 +90,67 @@
   // 초기 레이아웃 계산 이후 위치를 잡는다
   requestAnimationFrame(() => moveIndicatorTo(document.querySelector(".tab-btn.active")));
 
+  // 진행 상황 탭 내부의 서브탭(분석/주제별/이력) — 콘텐츠가 길어 스크롤이 많아지는 것을 막기 위한 인페이지 탭.
+  document.querySelectorAll(".subtab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const group = btn.closest(".tab-panel");
+      group.querySelectorAll(".subtab-btn").forEach((b) => b.classList.remove("active"));
+      group.querySelectorAll(".subtab-panel").forEach((p) => p.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("progress-sub-" + btn.dataset.subtab).classList.add("active");
+    });
+  });
+
   // data-goto-tab 버튼은 정적/동적 모두 지원하기 위해 이벤트 위임으로 처리한다.
-  // data-goto-topic이 함께 있으면 탭 전환 전에 해당 주제로 필터링/스크롤한다.
+  // data-goto-topic이 함께 있으면 탭 전환 후에 해당 주제로 필터링/스크롤한다.
+  // 탭 전환을 먼저 해야 하는 이유: materials 탭으로 스크롤할 때 그 탭 패널이 아직 비활성(숨김) 상태면
+  // scrollIntoView가 레이아웃이 없는 요소를 대상으로 해 조용히 실패한다(캐시된 문서를 다시 열 때 특히).
   document.addEventListener("click", (e) => {
     const el = e.target.closest("[data-goto-tab]");
     if (!el) return;
     const tab = el.dataset.gotoTab;
     const topic = el.dataset.gotoTopic;
-    if (topic) applyTopicJump(tab, topic);
     const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
     if (btn) btn.click();
+    if (topic) applyTopicJump(tab, topic);
+  });
+
+  // 진행 상황 탭의 "안 읽은 챕터" 목록 — 주제의 첫 챕터가 아니라 클릭한 그 챕터로 정확히 이동.
+  document.addEventListener("click", (e) => {
+    const row = e.target.closest(".unread-chapter-row[data-chapter-id]");
+    if (!row) return;
+    jumpToChapter(row.dataset.chapterId);
+  });
+
+  // 선택적 데이터 초기화 — 되돌릴 수 없으므로 confirm으로 한 번 더 확인하고, 여러 곳에 캐시된
+  // 메모리 상태(mastered/readChapters 등)를 일일이 되돌리는 대신 새로고침으로 깔끔하게 재동기화한다.
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-reset]");
+    if (!btn) return;
+    const type = btn.dataset.reset;
+    const messages = {
+      quiz: "퀴즈·모의고사 관련 기록(점수 이력, 오답 추적, 응시 기록)을 모두 지웁니다. 계속할까요?",
+      flashcards: "플래시카드 암기 완료 표시를 모두 지웁니다. 계속할까요?",
+      all: "읽음 표시·레벨·플래시카드·퀴즈·모의고사·학습 계획 체크리스트 등 저장된 모든 학습 데이터를 지웁니다. 계속할까요?",
+    };
+    if (!confirm(messages[type])) return;
+    if (type === "quiz" || type === "all") {
+      localStorage.removeItem(QUIZ_HISTORY_KEY);
+      localStorage.removeItem(WRONG_TRACKER_KEY);
+      localStorage.removeItem(QUIZ_SESSION_LOG_KEY);
+      localStorage.removeItem(MOCK_EXAM_HISTORY_KEY);
+    }
+    if (type === "flashcards" || type === "all") {
+      localStorage.removeItem(MASTERED_KEY);
+    }
+    if (type === "all") {
+      localStorage.removeItem(READ_CHAPTERS_KEY);
+      localStorage.removeItem(CHAPTER_TESTED_KEY);
+      localStorage.removeItem(LEVEL_KEY);
+      localStorage.removeItem(PROGRESS_KEY);
+      localStorage.removeItem(GOAL_SCORE_KEY);
+    }
+    location.reload();
   });
 
   // 용어 툴팁: 데스크톱은 :hover/:focus로 자동 표시되지만, 모바일은 hover가 없어 탭으로 토글해야 한다.
@@ -797,14 +848,18 @@
     scrollToId("sec-" + slugify(headings[0]));
   }
 
-  function loadMaterialsDoc(docKey, scrollTopic) {
+  function loadMaterialsDoc(docKey, scrollTopic, scrollChapterId) {
     const body = document.getElementById("materials-body");
+    const doScroll = () => {
+      if (scrollChapterId) scrollToId(scrollChapterId);
+      else if (scrollTopic) scrollToTopicChapter(scrollTopic);
+    };
     if (materialsCache[docKey]) {
       body.innerHTML = materialsCache[docKey].html;
       renderMaterialsToc(materialsCache[docKey].toc);
       applyChapterReadState(body);
       applyChapterStepState(body);
-      if (scrollTopic) scrollToTopicChapter(scrollTopic);
+      doScroll();
       return;
     }
     body.innerHTML = '<p class="hint">불러오는 중…</p>';
@@ -822,13 +877,23 @@
           renderMaterialsToc(result.toc);
           applyChapterReadState(body);
           applyChapterStepState(body);
-          if (scrollTopic) scrollToTopicChapter(scrollTopic);
+          doScroll();
         }
       })
       .catch(() => {
         body.innerHTML =
           '<p class="hint">문서를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>';
       });
+  }
+
+  // 진행 상황 탭의 "안 읽은 챕터" 목록 등에서 주제의 첫 챕터가 아니라 그 챕터 자체로 정확히 이동한다.
+  function jumpToChapter(chapterId) {
+    // 탭을 먼저 활성화한 뒤 로드+스크롤해야 한다 — 그렇지 않으면 캐시된 문서를 다시 열 때
+    // materials 패널이 아직 숨겨진 상태라 scrollIntoView가 조용히 실패한다.
+    document.querySelector('.tab-btn[data-tab="materials"]').click();
+    document.querySelectorAll(".materials-switch-btn").forEach((b) => b.classList.toggle("active", b.dataset.doc === "study-guide"));
+    currentMaterialsDoc = "study-guide";
+    loadMaterialsDoc("study-guide", null, chapterId);
   }
 
   document.querySelectorAll(".materials-switch-btn").forEach((btn) => {
@@ -2048,6 +2113,86 @@
     }).join("");
   }
 
+  // 주제 x 최근 5회 응시를 히트맵으로 — 각 셀은 그 주제만 다룬 세션(전체/모의고사 제외) 기록 하나.
+  // 왼쪽이 오래된 시도, 오른쪽이 가장 최근 시도가 되도록 정렬해 추세를 한눈에 읽을 수 있게 한다.
+  function heatCellClass(pct) {
+    if (pct >= 85) return "heat-high";
+    if (pct >= 70) return "heat-mid";
+    return "heat-low";
+  }
+  function renderTopicHeatmap(sessionLog) {
+    const container = document.getElementById("topic-heatmap");
+    if (!container) return;
+    const rows = TOPICS.map((topic) => ({
+      topic,
+      entries: sessionLog.filter((s) => s.topic === topic.key).slice(0, 5),
+    })).filter((r) => r.entries.length > 0);
+
+    if (rows.length === 0) {
+      container.innerHTML = "";
+      return;
+    }
+
+    const rowsHtml = rows
+      .map((r) => {
+        const oldestFirst = r.entries.slice().reverse();
+        const padded = Array(5 - oldestFirst.length).fill(null).concat(oldestFirst);
+        const cells = padded
+          .map((entry) => {
+            if (!entry) return `<span class="heat-cell heat-empty"></span>`;
+            const date = new Date(entry.at);
+            const dateLabel = `${date.getMonth() + 1}/${date.getDate()}`;
+            return `<span class="heat-cell ${heatCellClass(entry.pct)}" title="${dateLabel} · ${entry.pct}%"></span>`;
+          })
+          .join("");
+        return `
+          <div class="heat-row">
+            <span class="heat-row-label">${dotHtml(domainColor(r.topic.domain))}${r.topic.label}</span>
+            <span class="heat-cells">${cells}</span>
+          </div>
+        `;
+      })
+      .join("");
+
+    container.innerHTML = `<h4 class="analysis-subtitle">최근 5회 응시 추이 (주제만 다룬 세션 기준)</h4><div class="topic-heatmap-grid">${rowsHtml}</div>`;
+  }
+
+  // 안 읽은 챕터를 주제별로 묶어 접이식으로 보여준다 — 클릭하면 학습 자료 탭의 그 챕터로 정확히 이동.
+  function renderUnreadChapters() {
+    const container = document.getElementById("unread-chapters");
+    if (!container) return;
+    const byTopic = TOPICS.map((topic) => {
+      const chapters = STUDY_GUIDE_CHAPTERS[topic.key] || [];
+      const unread = chapters.filter((h) => !readChapters.has("sec-" + slugify(h)));
+      return { topic, unread };
+    }).filter((t) => t.unread.length > 0);
+
+    const totalUnread = byTopic.reduce((sum, t) => sum + t.unread.length, 0);
+    if (totalUnread === 0) {
+      container.innerHTML = `<p class="analysis-empty">🎉 모든 챕터를 다 읽었어요!</p>`;
+      return;
+    }
+
+    const groupsHtml = byTopic
+      .map((t) => {
+        const rowsHtml = t.unread
+          .map((h) => {
+            const chapterId = "sec-" + slugify(h);
+            return `<button class="unread-chapter-row" type="button" data-chapter-id="${chapterId}">${h}</button>`;
+          })
+          .join("");
+        return `<div class="unread-chapter-group"><h5>${dotHtml(domainColor(t.topic.domain))}${t.topic.label} (${t.unread.length})</h5>${rowsHtml}</div>`;
+      })
+      .join("");
+
+    container.innerHTML = `
+      <details class="unread-chapters-details">
+        <summary>📖 안 읽은 챕터 ${totalUnread}개</summary>
+        ${groupsHtml}
+      </details>
+    `;
+  }
+
   // 퀴즈 결과 화면과 동일한 85%/70% 기준으로 강점/보통/약점/미응시를 분류한다.
   function classifyTopicStatus(quizPct) {
     if (quizPct === null) return "untested";
@@ -2103,7 +2248,81 @@
     return "same";
   }
 
+  // computeTopicTrend와 같은 최근 두 회차 비교지만, 방향뿐 아니라 실제 증감폭(%p)까지 필요할 때 쓴다
+  // ("가장 향상된 주제" 하이라이트처럼 여러 주제를 크기순으로 비교해야 하는 경우).
+  function computeTopicTrendDelta(topicKey, sessionLog) {
+    const entries = sessionLog.filter((s) => s.topic === topicKey);
+    if (entries.length < 2) return null;
+    const [latest, previous] = entries;
+    return { delta: latest.pct - previous.pct };
+  }
+
   const TREND_ICON = { up: "▲", down: "▼", same: "―" };
+
+  // 도메인 3개의 준비도를 삼각형 레이더 차트로 그린다(라이브러리 없이 순수 SVG).
+  function renderDomainRadarSvg(byDomain) {
+    const size = 200;
+    const center = size / 2;
+    const maxR = 76;
+    const domains = [1, 2, 3];
+    const angleFor = (i) => (-90 + i * 120) * (Math.PI / 180);
+    const pointFor = (i, pct) => {
+      const r = (Math.max(0, Math.min(100, pct)) / 100) * maxR;
+      const a = angleFor(i);
+      return [center + r * Math.cos(a), center + r * Math.sin(a)];
+    };
+    const ringPolys = [25, 50, 75, 100]
+      .map((pct) => {
+        const pts = domains.map((_, i) => pointFor(i, pct).join(",")).join(" ");
+        return `<polygon points="${pts}" fill="none" stroke="var(--border)" stroke-width="1"/>`;
+      })
+      .join("");
+    const axisLines = domains
+      .map((_, i) => {
+        const [x, y] = pointFor(i, 100);
+        return `<line x1="${center}" y1="${center}" x2="${x}" y2="${y}" stroke="var(--border)" stroke-width="1"/>`;
+      })
+      .join("");
+    const dataPts = domains
+      .map((d, i) => {
+        const stat = byDomain[d];
+        const pct = stat ? Math.round((stat.correct / stat.total) * 100) : 0;
+        return pointFor(i, pct).join(",");
+      })
+      .join(" ");
+    const labels = domains
+      .map((d, i) => {
+        const [x, y] = pointFor(i, 124);
+        const anchor = Math.abs(x - center) < 4 ? "middle" : x > center ? "start" : "end";
+        return `<text x="${x}" y="${y}" font-size="11" text-anchor="${anchor}" dominant-baseline="middle">${DOMAIN_LABELS[d]}</text>`;
+      })
+      .join("");
+    return `
+      <svg viewBox="0 0 ${size} ${size}" class="domain-radar" role="img" aria-label="도메인별 준비도 레이더 차트">
+        ${ringPolys}${axisLines}
+        <polygon points="${dataPts}" class="domain-radar-data"/>
+        ${labels}
+      </svg>
+    `;
+  }
+
+  // 사용자가 직접 정하는 목표 점수(1000점 만점) — 현재 예상 준비도와의 갭을 보여주는 데 쓰인다.
+  const GOAL_SCORE_KEY = "az900-goal-score-v1";
+  function loadGoalScore() {
+    const v = parseInt(localStorage.getItem(GOAL_SCORE_KEY), 10);
+    return Number.isFinite(v) ? v : null;
+  }
+  function saveGoalScore(v) {
+    if (v === null) localStorage.removeItem(GOAL_SCORE_KEY);
+    else localStorage.setItem(GOAL_SCORE_KEY, String(v));
+  }
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#goal-score-save")) return;
+    const input = document.getElementById("goal-score-input");
+    const v = parseInt(input.value, 10);
+    saveGoalScore(Number.isFinite(v) && v > 0 ? Math.min(1000, v) : null);
+    renderProgress();
+  });
 
   function renderLearningAnalysis(quizHistory, sessionLog) {
     const container = document.getElementById("learning-analysis");
@@ -2133,6 +2352,22 @@
       ? `<p class="analysis-readiness"><strong>${readiness.scaledScore}점</strong> / 1000점 <span class="analysis-readiness-sub">(누적 ${readiness.correct}/${readiness.total}문항 · ${readiness.pct}%) — 연습 문제 기준 예상 준비도</span></p>`
       : `<p class="analysis-readiness analysis-empty">아직 퀴즈 기록이 없어요. 몇 문제라도 풀어보면 예상 준비도가 표시돼요.</p>`;
 
+    const goalScore = loadGoalScore();
+    const goalGapHtml =
+      readiness && goalScore !== null
+        ? goalScore <= readiness.scaledScore
+          ? `<p class="analysis-goal-gap analysis-goal-met">🎉 목표 ${goalScore}점을 넘었어요! (현재 ${readiness.scaledScore}점)</p>`
+          : `<p class="analysis-goal-gap">현재 ${readiness.scaledScore}점 · 목표까지 <strong>${goalScore - readiness.scaledScore}점</strong> 남았어요</p>`
+        : "";
+    const goalRowHtml = `
+      <div class="analysis-goal-row">
+        <label for="goal-score-input">🎯 목표 점수</label>
+        <input type="number" id="goal-score-input" min="0" max="1000" step="10" placeholder="예: 800" value="${goalScore !== null ? goalScore : ""}">
+        <button class="btn-sm" type="button" id="goal-score-save">저장</button>
+      </div>
+      ${goalGapHtml}
+    `;
+
     const byDomain = computeDomainBreakdown(quizHistory);
     const domainRowsHtml = [1, 2, 3]
       .filter((d) => byDomain[d])
@@ -2151,7 +2386,9 @@
       })
       .join("");
     const domainHtml = domainRowsHtml
-      ? `<h4 class="analysis-subtitle">도메인별 준비도 (실제 시험 출제 비중 기준)</h4><div class="topic-breakdown">${domainRowsHtml}</div>`
+      ? `<h4 class="analysis-subtitle">도메인별 준비도 (실제 시험 출제 비중 기준)</h4>
+         <div class="domain-radar-wrap">${renderDomainRadarSvg(byDomain)}</div>
+         <div class="topic-breakdown">${domainRowsHtml}</div>`
       : "";
 
     const wrongCount = Object.keys(loadWrongTracker()).length;
@@ -2165,17 +2402,35 @@
       ? `<p class="analysis-strengths">💪 강점 주제: ${strengths.join(", ")}</p>`
       : "";
 
+    // 두 회차 이상 치른 주제 중 가장 많이 오른 주제 / 가장 정체된(또는 떨어진) 주제를 한 줄로 강조.
+    const trendDeltas = TOPICS.map((t) => ({ topic: t, d: computeTopicTrendDelta(t.key, sessionLog) })).filter((x) => x.d);
+    const mostImproved = trendDeltas.filter((x) => x.d.delta > 0).sort((a, b) => b.d.delta - a.d.delta)[0];
+    const mostStagnant = trendDeltas
+      .filter((x) => !mostImproved || x.topic.key !== mostImproved.topic.key)
+      .sort((a, b) => a.d.delta - b.d.delta)[0];
+    const trendHighlightParts = [];
+    if (mostImproved) trendHighlightParts.push(`📈 가장 향상된 주제: ${mostImproved.topic.label} (+${mostImproved.d.delta}%p)`);
+    if (mostStagnant) {
+      const sign = mostStagnant.d.delta > 0 ? "+" : "";
+      trendHighlightParts.push(`📉 정체된 주제: ${mostStagnant.topic.label} (${sign}${mostStagnant.d.delta}%p)`);
+    }
+    const trendHighlightHtml = trendHighlightParts.length
+      ? `<p class="analysis-trend-highlight">${trendHighlightParts.join(" · ")}</p>`
+      : "";
+
     const rowsHtml = needsWork.length
       ? needsWork
-          .map((r) => {
+          .map((r, idx) => {
             const rec = recommendAction(r.stats.readPct, r.stats.fcPct);
             const badgeLabel = r.status === "weak" ? "약점" : "미응시";
             const pctLabel = r.stats.quizPct === null ? "테스트 기록 없음" : `퀴즈 ${r.stats.quizPct}%`;
             const trendHtml = r.trend
               ? `<span class="analysis-trend analysis-trend-${r.trend}">${TREND_ICON[r.trend]}</span>`
               : "";
+            const priorityHtml = idx < 3 ? `<span class="analysis-priority" title="우선순위 ${idx + 1}위">${["①", "②", "③"][idx]}</span>` : "";
             return `
               <div class="analysis-row">
+                ${priorityHtml}
                 <span class="analysis-topic">${dotHtml(domainColor(r.topic.domain))}${r.topic.label}</span>
                 <span class="analysis-badge analysis-badge-${r.status}">${badgeLabel}</span>
                 <span class="analysis-pct">${pctLabel}${trendHtml}</span>
@@ -2187,7 +2442,8 @@
           .join("")
       : `<p class="analysis-empty">모든 주제가 양호해요. 꾸준히 복습만 이어가면 됩니다 🎉</p>`;
 
-    container.innerHTML = readinessHtml + domainHtml + wrongHtml + summaryHtml + strengthsHtml + rowsHtml;
+    container.innerHTML =
+      readinessHtml + goalRowHtml + domainHtml + wrongHtml + summaryHtml + strengthsHtml + trendHighlightHtml + rowsHtml;
   }
 
   function sessionModeLabel(mode) {
@@ -2197,35 +2453,91 @@
     return "퀴즈";
   }
 
+  // 응시 기록 필터 셀렉트는 최초 1회만 채운다 — renderSessionLog()에서 매번 innerHTML을 다시 쓰면
+  // 사용자가 골라둔 필터 값이 재렌더링 때마다 초기화돼 버린다.
+  function populateSessionFilters() {
+    const modeSel = document.getElementById("session-filter-mode");
+    const topicSel = document.getElementById("session-filter-topic");
+    if (!modeSel || !topicSel) return;
+    const modes = [
+      ["", "전체 모드"],
+      ["quiz", "퀴즈"],
+      ["wrong-review", "오답 복습"],
+      ["chapter-check", "챕터 테스트"],
+      ["mock-exam", "모의고사"],
+    ];
+    modeSel.innerHTML = modes.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
+    const topicOptions = [`<option value="">전체 주제</option>`, `<option value="all">혼합(전체/모의고사)</option>`].concat(
+      TOPICS.map((t) => `<option value="${t.key}">${t.label}</option>`)
+    );
+    topicSel.innerHTML = topicOptions.join("");
+    modeSel.addEventListener("change", renderSessionLog);
+    topicSel.addEventListener("change", renderSessionLog);
+  }
+
   function renderSessionLog() {
     const container = document.getElementById("session-log-list");
     if (!container) return;
-    const log = loadSessionLog();
-    if (log.length === 0) {
+    const rawLog = loadSessionLog();
+    if (rawLog.length === 0) {
       container.innerHTML = '<p class="hint">아직 응시 기록이 없어요.</p>';
       return;
     }
-    container.innerHTML = log
-      .map((entry) => {
-        const date = new Date(entry.at);
-        const dateLabel = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-        const topicText = entry.topic === "all" ? "전체" : topicLabel(entry.topic);
-        return `
-          <div class="session-log-row">
-            <span class="session-log-date">${dateLabel}</span>
-            <span class="session-log-mode">${sessionModeLabel(entry.mode)}</span>
-            <span class="session-log-topic">${topicText}</span>
-            <span class="session-log-score">${entry.correct}/${entry.count} (${entry.pct}%)</span>
-          </div>
-        `;
+
+    const modeSel = document.getElementById("session-filter-mode");
+    const topicSel = document.getElementById("session-filter-topic");
+    const modeFilter = modeSel ? modeSel.value : "";
+    const topicFilter = topicSel ? topicSel.value : "";
+    let log = rawLog;
+    if (modeFilter) log = log.filter((e) => e.mode === modeFilter);
+    if (topicFilter) log = log.filter((e) => e.topic === topicFilter);
+    if (log.length === 0) {
+      container.innerHTML = '<p class="hint">해당 조건에 맞는 기록이 없어요.</p>';
+      return;
+    }
+
+    // 이미 최신순으로 정렬된 기록을 순서 그대로 훑으며 "YYYY년 M월"이 바뀔 때마다 새 그룹을 연다.
+    const groups = [];
+    let currentKey = null;
+    log.forEach((entry) => {
+      const date = new Date(entry.at);
+      const key = `${date.getFullYear()}년 ${date.getMonth() + 1}월`;
+      if (key !== currentKey) {
+        groups.push({ key, entries: [] });
+        currentKey = key;
+      }
+      groups[groups.length - 1].entries.push(entry);
+    });
+
+    container.innerHTML = groups
+      .map((g) => {
+        const rowsHtml = g.entries
+          .map((entry) => {
+            const date = new Date(entry.at);
+            const dateLabel = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+            const topicText = entry.topic === "all" ? "전체" : topicLabel(entry.topic);
+            return `
+              <div class="session-log-row">
+                <span class="session-log-date">${dateLabel}</span>
+                <span class="session-log-mode">${sessionModeLabel(entry.mode)}</span>
+                <span class="session-log-topic">${topicText}</span>
+                <span class="session-log-score">${entry.correct}/${entry.count} (${entry.pct}%)</span>
+              </div>
+            `;
+          })
+          .join("");
+        return `<h5 class="session-log-month">${g.key}</h5>${rowsHtml}`;
       })
       .join("");
   }
 
   function renderProgress() {
     const quizHistory = loadQuizHistory();
-    renderLearningAnalysis(quizHistory, loadSessionLog());
+    const sessionLog = loadSessionLog();
+    renderLearningAnalysis(quizHistory, sessionLog);
     renderTopicMastery(quizHistory);
+    renderTopicHeatmap(sessionLog);
+    renderUnreadChapters();
     renderSessionLog();
     renderStudyPlan();
   }
@@ -2429,6 +2741,7 @@
     syncStickyOffset();
   }
 
+  populateSessionFilters();
   renderProgress();
   renderNextStepBar();
 })();

@@ -845,6 +845,73 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.topic-heatmap-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.2rem;
+}
+.heat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.heat-row-label {
+  display: flex;
+  align-items: center;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.heat-cells { display: flex; gap: 4px; flex-shrink: 0; }
+.heat-cell {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--meter-track);
+}
+.heat-cell.heat-empty { background: transparent; border: 1px dashed var(--border); }
+.heat-cell.heat-high { background: var(--good); }
+.heat-cell.heat-mid { background: var(--accent); }
+.heat-cell.heat-low { background: var(--critical); }
+
+.unread-chapters-details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 1.4rem;
+}
+.unread-chapters-details summary {
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.unread-chapter-group { margin-top: 0.7rem; }
+.unread-chapter-group h5 {
+  display: flex;
+  align-items: center;
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.unread-chapter-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0.3rem 0.2rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.unread-chapter-row:hover { background: var(--surface-raised); color: var(--accent); }
+
 .topic-mastery-list {
   display: flex;
   flex-direction: column;
@@ -955,6 +1022,53 @@ button {
   color: var(--good);
   margin: 0 0 0.9rem;
 }
+.analysis-trend-highlight {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0 0 0.9rem;
+}
+.analysis-priority {
+  flex-shrink: 0;
+  font-size: 0.9rem;
+}
+
+.analysis-goal-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+.analysis-goal-row input[type="number"] {
+  width: 90px;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+}
+.analysis-goal-gap {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0 0 0.9rem;
+}
+.analysis-goal-gap.analysis-goal-met { color: var(--good); }
+
+.domain-radar-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 0.8rem;
+}
+.domain-radar { width: 100%; max-width: 220px; }
+.domain-radar text { fill: var(--text-secondary); }
+.domain-radar-data {
+  fill: color-mix(in srgb, var(--accent) 25%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
 .analysis-row {
   display: flex;
   align-items: center;
@@ -995,6 +1109,36 @@ button {
   flex: 1 1 160px;
 }
 .analysis-empty { color: var(--text-muted); font-size: 0.9rem; }
+
+.data-reset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.4rem;
+}
+
+.session-log-filters {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+.session-log-filters select {
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.85rem;
+}
+.session-log-month {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin: 0.9rem 0 0.35rem;
+}
+.session-log-month:first-child { margin-top: 0; }
 
 .session-log-list {
   display: flex;
@@ -1236,6 +1380,33 @@ button {
   color: var(--surface);
   font-weight: 600;
 }
+
+/* ---------- 범용 인페이지 서브탭 (진행 상황 탭의 분석/주제별/이력 등) ---------- */
+.subtab-switch {
+  display: flex;
+  gap: 0.4rem;
+  margin: 1.2rem 0 1.4rem;
+  flex-wrap: wrap;
+}
+.subtab-btn {
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.subtab-btn:hover { border-color: var(--accent); color: var(--accent); }
+.subtab-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+  font-weight: 600;
+}
+.subtab-panel { display: none; }
+.subtab-panel.active { display: block; }
 
 .markdown-view {
   margin-top: 1.2rem;

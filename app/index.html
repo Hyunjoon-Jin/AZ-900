@@ -234,14 +234,41 @@
       </div>
     </div>
 
-    <h3 class="section-title" style="margin-top:0;">학습 분석 &amp; 다음 학습 플랜</h3>
-    <div id="learning-analysis"></div>
+    <div class="subtab-switch">
+      <button class="subtab-btn active" type="button" data-subtab="analysis">분석</button>
+      <button class="subtab-btn" type="button" data-subtab="topics">주제별</button>
+      <button class="subtab-btn" type="button" data-subtab="history">이력</button>
+    </div>
 
-    <h3 class="section-title">주제별 학습 현황</h3>
-    <div id="topic-mastery" class="topic-mastery-list"></div>
+    <div id="progress-sub-analysis" class="subtab-panel active">
+      <h3 class="section-title" style="margin-top:0;">학습 분석 &amp; 다음 학습 플랜</h3>
+      <div id="learning-analysis"></div>
+    </div>
 
-    <h3 class="section-title">최근 응시 기록</h3>
-    <div id="session-log-list" class="session-log-list"></div>
+    <div id="progress-sub-topics" class="subtab-panel">
+      <h3 class="section-title" style="margin-top:0;">주제별 학습 현황</h3>
+      <div id="topic-heatmap"></div>
+      <div id="topic-mastery" class="topic-mastery-list"></div>
+      <div id="unread-chapters"></div>
+    </div>
+
+    <div id="progress-sub-history" class="subtab-panel">
+      <h3 class="section-title" style="margin-top:0;">최근 응시 기록</h3>
+      <div class="session-log-filters">
+        <select id="session-filter-mode"></select>
+        <select id="session-filter-topic"></select>
+      </div>
+      <div id="session-log-list" class="session-log-list"></div>
+      <h3 class="section-title">데이터 관리</h3>
+      <div class="data-reset-panel">
+        <p class="hint" style="margin-bottom:0.6rem;">아래 작업은 되돌릴 수 없습니다. 확인 후 진행하세요.</p>
+        <div class="data-reset-actions">
+          <button class="btn-outline btn-danger-outline" type="button" data-reset="quiz">퀴즈·모의고사 기록 초기화</button>
+          <button class="btn-outline btn-danger-outline" type="button" data-reset="flashcards">플래시카드 암기 기록 초기화</button>
+          <button class="btn-outline btn-danger-outline" type="button" data-reset="all">전체 초기화</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- 학습 계획 (10일 체크리스트) -->
