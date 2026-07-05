@@ -330,6 +330,24 @@ body::before {
 .tab-btn:hover { color: var(--text-primary); }
 .tab-btn.active { color: #fff; font-weight: 600; }
 
+/* 탭이 늘어나 화면 너비를 넘으면 여러 줄로 접히는 대신 한 줄로 가로 스크롤한다(메뉴 영역이 세로로 비대해지는 것 방지). */
+@media (max-width: 640px) {
+  .tabs {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 0.7rem 1rem;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab-btn {
+    flex-shrink: 0;
+    padding: 0.5rem 0.8rem;
+    font-size: 0.86rem;
+  }
+}
+
 main {
   max-width: 720px;
   margin: 0 auto;

@@ -41,11 +41,11 @@
   let activeTab = "flashcards";
 
   function moveIndicatorTo(btn) {
-    const btnRect = btn.getBoundingClientRect();
-    const parentRect = tabsEl.getBoundingClientRect();
-    tabIndicator.style.width = btnRect.width + "px";
-    tabIndicator.style.height = btnRect.height + "px";
-    tabIndicator.style.transform = `translate(${btnRect.left - parentRect.left}px, ${btnRect.top - parentRect.top}px)`;
+    // offsetLeft/offsetTop는 스크롤 위치와 무관하게 offsetParent(.tabs) 기준 좌표를 주므로,
+    // 탭 바가 가로로 스크롤되는 좁은 화면에서도(모바일) 항상 정확하게 맞는다.
+    tabIndicator.style.width = btn.offsetWidth + "px";
+    tabIndicator.style.height = btn.offsetHeight + "px";
+    tabIndicator.style.transform = `translate(${btn.offsetLeft}px, ${btn.offsetTop}px)`;
   }
 
   // fade-in 애니메이션이 끝나면 남아있는 transform을 제거해, 그 안의 position:fixed 요소가
@@ -65,6 +65,8 @@
       activeTab = btn.dataset.tab;
       document.getElementById("tab-" + activeTab).classList.add("active");
       moveIndicatorTo(btn);
+      // 좁은 화면에서는 탭 바가 가로 스크롤되므로, data-goto-tab 점프처럼 화면 밖 탭이 활성화될 때도 보이게 스크롤한다.
+      btn.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "nearest", inline: "nearest" });
       if (activeTab === "leveltest") refreshLevelIntro();
       if (activeTab === "materials") loadMaterialsDoc(currentMaterialsDoc);
       if (activeTab === "progress") renderProgress();
