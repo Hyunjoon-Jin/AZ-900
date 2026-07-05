@@ -122,6 +122,25 @@
     jumpToChapter(row.dataset.chapterId);
   });
 
+  // 진행 상황 탭의 "약점 챕터" 목록 — 챕터 하나만 다시 테스트하거나, 전부 모아서 한 번에 복습.
+  document.addEventListener("click", (e) => {
+    const jumpBtn = e.target.closest("[data-chapter-test-jump]");
+    if (jumpBtn) {
+      startQuickCheckQuiz(jumpBtn.dataset.chapterTestJump);
+      return;
+    }
+    const reviewAllBtn = e.target.closest("#weak-chapters-review-all");
+    if (!reviewAllBtn) return;
+    const history = loadChapterHistory();
+    const weakHeadings = Object.keys(history)
+      .filter((chId) => CHAPTER_HEADING[chId] && history[chId].lastPct < WEAK_CHAPTER_THRESHOLD)
+      .map((chId) => CHAPTER_HEADING[chId]);
+    const pool = QUIZ.filter((q) => weakHeadings.includes(q.chapter));
+    if (pool.length === 0) return;
+    document.querySelector('.tab-btn[data-tab="quiz"]').click();
+    startQuiz(shuffle(pool).slice(0, Math.min(WEAK_CHAPTER_POOL_MAX, pool.length)), "chapter-weak-review");
+  });
+
   // 선택적 데이터 초기화 — 되돌릴 수 없으므로 confirm으로 한 번 더 확인하고, 여러 곳에 캐시된
   // 메모리 상태(mastered/readChapters 등)를 일일이 되돌리는 대신 새로고침으로 깔끔하게 재동기화한다.
   document.addEventListener("click", (e) => {
@@ -139,9 +158,11 @@
       localStorage.removeItem(WRONG_TRACKER_KEY);
       localStorage.removeItem(QUIZ_SESSION_LOG_KEY);
       localStorage.removeItem(MOCK_EXAM_HISTORY_KEY);
+      localStorage.removeItem(CHAPTER_HISTORY_KEY);
     }
     if (type === "flashcards" || type === "all") {
       localStorage.removeItem(MASTERED_KEY);
+      localStorage.removeItem(MASTERED_AT_KEY);
     }
     if (type === "all") {
       localStorage.removeItem(READ_CHAPTERS_KEY);
@@ -149,9 +170,65 @@
       localStorage.removeItem(LEVEL_KEY);
       localStorage.removeItem(PROGRESS_KEY);
       localStorage.removeItem(GOAL_SCORE_KEY);
+      localStorage.removeItem(ACTIVITY_DATES_KEY);
+      localStorage.removeItem(EXAM_DATE_KEY);
     }
     location.reload();
   });
+
+  // 전체 데이터 백업/복원 — 다른 기기로 옮기거나 브라우저 데이터가 지워지는 상황에 대비한다.
+  // 특정 키 목록을 하드코딩하지 않고 "az900-"로 시작하는 모든 localStorage 키를 그대로 스캔해서 담기 때문에,
+  // 새 기능이 키를 추가해도 이 코드를 따로 갱신할 필요가 없다.
+  function exportAllData() {
+    const data = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("az900-")) data[key] = localStorage.getItem(key);
+    }
+    const payload = { exportedAt: new Date().toISOString(), data };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `az900-backup-${dateStr(new Date())}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+  function importAllData(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let payload;
+      try {
+        payload = JSON.parse(reader.result);
+      } catch (e) {
+        alert("파일을 읽는 중 문제가 발생했습니다. JSON 백업 파일이 맞는지 확인해주세요.");
+        return;
+      }
+      const data = payload && payload.data ? payload.data : payload;
+      const keys = data ? Object.keys(data).filter((k) => k.startsWith("az900-")) : [];
+      if (keys.length === 0) {
+        alert("올바른 백업 파일이 아닌 것 같아요.");
+        return;
+      }
+      if (!confirm(`백업 파일에서 ${keys.length}개 항목을 복원합니다. 현재 저장된 데이터는 덮어씌워집니다. 계속할까요?`)) return;
+      keys.forEach((k) => localStorage.setItem(k, data[k]));
+      location.reload();
+    };
+    reader.readAsText(file);
+  }
+  const dataExportBtn = document.getElementById("data-export-btn");
+  const dataImportBtn = document.getElementById("data-import-btn");
+  const dataImportFile = document.getElementById("data-import-file");
+  if (dataExportBtn) dataExportBtn.addEventListener("click", exportAllData);
+  if (dataImportBtn && dataImportFile) {
+    dataImportBtn.addEventListener("click", () => dataImportFile.click());
+    dataImportFile.addEventListener("change", () => {
+      if (dataImportFile.files[0]) importAllData(dataImportFile.files[0]);
+      dataImportFile.value = "";
+    });
+  }
 
   // 용어 툴팁: 데스크톱은 :hover/:focus로 자동 표시되지만, 모바일은 hover가 없어 탭으로 토글해야 한다.
   // 화면 가장자리 근처 용어는 툴팁이 뷰포트 밖으로 잘리지 않도록 위치를 보정한다.
@@ -252,6 +329,41 @@
     localStorage.setItem(CHAPTER_TESTED_KEY, JSON.stringify(Array.from(set)));
   }
   let testedChapters = loadTestedChapters();
+
+  // 하루 단위 학습 활동 기록(퀴즈/플래시카드 암기/챕터 읽음 중 하나라도 하면 오늘 날짜가 남는다) — 연속 학습일
+  // 스트릭과 최근 30일 활동 스트립에 쓰인다. 어떤 활동인지는 구분하지 않고 "그날 공부했는지"만 본다.
+  const ACTIVITY_DATES_KEY = "az900-activity-dates-v1";
+  function dateStr(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  function loadActivityDates() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(ACTIVITY_DATES_KEY)) || []);
+    } catch (e) {
+      return new Set();
+    }
+  }
+  function saveActivityDates(set) {
+    localStorage.setItem(ACTIVITY_DATES_KEY, JSON.stringify(Array.from(set)));
+  }
+  let activityDates = loadActivityDates();
+  function recordActivityToday() {
+    const key = dateStr(new Date());
+    if (activityDates.has(key)) return;
+    activityDates.add(key);
+    saveActivityDates(activityDates);
+  }
+  // 오늘 아직 활동이 없어도 스트릭은 끊긴 게 아니라 "어제까지" 기준으로 계산한다(하루가 안 끝났을 뿐이므로).
+  function computeStreak() {
+    let count = 0;
+    const cursor = new Date();
+    if (!activityDates.has(dateStr(cursor))) cursor.setDate(cursor.getDate() - 1);
+    while (activityDates.has(dateStr(cursor))) {
+      count++;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return count;
+  }
 
   function escapeHtml(str) {
     return str
@@ -748,6 +860,7 @@
     const cached = materialsCache[currentMaterialsDoc];
     if (cached) renderMaterialsToc(cached.toc);
     if (!wasRead && CHAPTER_TOPIC[id]) {
+      recordActivityToday();
       showChapterQuickCheckBanner(id);
     } else if (wasRead) {
       // 다시 안읽음으로 표시하면 그 챕터용 배너도 함께 지운다(더 이상 맥락에 안 맞으므로).
@@ -1096,6 +1209,41 @@
   }
   let mastered = loadMastered();
 
+  // 카드를 언제 암기 완료로 표시했는지 별도로 기록한다(mastered 자체는 Set이라 시간 정보가 없다) —
+  // 일정 기간이 지난 카드를 "복습 필요"로 표시하는 데 쓴다. mastered와 분리해 기존 코드 전반의
+  // mastered.has()/add()/delete() 호출부는 전혀 건드리지 않는다.
+  const MASTERED_AT_KEY = "az900-mastered-at-v1";
+  function loadMasteredAt() {
+    try {
+      return JSON.parse(localStorage.getItem(MASTERED_AT_KEY)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function saveMasteredAt(obj) {
+    localStorage.setItem(MASTERED_AT_KEY, JSON.stringify(obj));
+  }
+  let masteredAt = loadMasteredAt();
+  const REVIEW_DUE_DAYS = 7;
+  // mastered에는 있는데 masteredAt 기록이 없는 카드(이 기능이 생기기 전에 이미 암기 완료로 표시된 카드)는
+  // "방금 암기함"으로 소급 적용한다 — 업데이트 직후 전부 "복습 필요"로 쏟아지는 것을 막기 위함.
+  function computeReviewDueCards() {
+    const now = Date.now();
+    const dueIds = [];
+    let backfilled = false;
+    mastered.forEach((id) => {
+      if (!(id in masteredAt)) {
+        masteredAt[id] = now;
+        backfilled = true;
+        return;
+      }
+      const daysSince = (now - masteredAt[id]) / (1000 * 60 * 60 * 24);
+      if (daysSince >= REVIEW_DUE_DAYS) dueIds.push(id);
+    });
+    if (backfilled) saveMasteredAt(masteredAt);
+    return dueIds;
+  }
+
   const fcTopicSel = document.getElementById("fc-topic");
   const fcHideMastered = document.getElementById("fc-hide-mastered");
   const fcCard = document.getElementById("fc-card");
@@ -1137,8 +1285,31 @@
     fcMeterLabel.textContent = `암기 ${known}/${total}`;
   }
 
+  // 암기 완료로 표시한 지 REVIEW_DUE_DAYS일 이상 지난 카드를 모아 바로 복습할 수 있는 버튼을 보여준다.
+  function renderReviewDue() {
+    const container = document.getElementById("fc-review-due");
+    if (!container) return;
+    const dueIds = computeReviewDueCards();
+    container.innerHTML =
+      dueIds.length > 0
+        ? `<button class="btn-sm" type="button" id="fc-review-due-start">🔁 복습 필요 카드 ${dueIds.length}장 (암기한 지 ${REVIEW_DUE_DAYS}일 이상)</button>`
+        : "";
+  }
+  function startReviewDueDeck(dueIds) {
+    fcTopicSel.value = "all";
+    fcPool = FLASHCARDS.filter((c) => dueIds.includes(c.id));
+    fcDeck = shuffle(fcPool.slice());
+    fcIndex = 0;
+    renderFcCard();
+  }
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#fc-review-due-start")) return;
+    startReviewDueDeck(computeReviewDueCards());
+  });
+
   function renderFcCard() {
     updateFcMeter();
+    renderReviewDue();
     fcCard.classList.remove("flipped");
     if (fcDeck.length === 0) {
       fcStage.classList.add("hidden");
@@ -1188,6 +1359,9 @@
     const card = fcDeck[fcIndex];
     mastered.add(card.id);
     saveMastered(mastered);
+    masteredAt[card.id] = Date.now();
+    saveMasteredAt(masteredAt);
+    recordActivityToday();
     if (fcHideMastered.checked) {
       fcDeck.splice(fcIndex, 1);
       if (fcIndex >= fcDeck.length) fcIndex = 0;
@@ -1201,11 +1375,17 @@
     const card = fcDeck[fcIndex];
     mastered.delete(card.id);
     saveMastered(mastered);
+    delete masteredAt[card.id];
+    saveMasteredAt(masteredAt);
     fcAdvance();
   });
   document.getElementById("fc-empty-reset").addEventListener("click", () => {
-    fcPool.forEach((c) => mastered.delete(c.id));
+    fcPool.forEach((c) => {
+      mastered.delete(c.id);
+      delete masteredAt[c.id];
+    });
     saveMastered(mastered);
+    saveMasteredAt(masteredAt);
     loadFcDeck();
   });
 
@@ -1238,6 +1418,33 @@
       history[t] = entry;
     });
     saveQuizHistory(history);
+  }
+
+  // 주제 단위 quizHistory와 같은 모양을 챕터 단위로도 병행 축적한다 — "약점 챕터" 분석에 쓰인다.
+  const CHAPTER_HISTORY_KEY = "az900-chapter-history-v1";
+  function loadChapterHistory() {
+    try {
+      return JSON.parse(localStorage.getItem(CHAPTER_HISTORY_KEY)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function saveChapterHistory(data) {
+    localStorage.setItem(CHAPTER_HISTORY_KEY, JSON.stringify(data));
+  }
+  function updateChapterHistory(byChapter) {
+    const history = loadChapterHistory();
+    Object.keys(byChapter).forEach((c) => {
+      const stat = byChapter[c];
+      const entry = history[c] || { attempts: 0, correct: 0, total: 0, lastPct: 0, lastAt: 0 };
+      entry.attempts += 1;
+      entry.correct += stat.correct;
+      entry.total += stat.total;
+      entry.lastPct = Math.round((stat.correct / stat.total) * 100);
+      entry.lastAt = Date.now();
+      history[c] = entry;
+    });
+    saveChapterHistory(history);
   }
 
   // 문항별 오답 추적: 틀린 문제는 missCount 증가, 2연속 정답이면 "극복"으로 보고 추적 해제.
@@ -1286,6 +1493,7 @@
     const log = loadSessionLog();
     log.unshift(entry);
     localStorage.setItem(QUIZ_SESSION_LOG_KEY, JSON.stringify(log.slice(0, SESSION_LOG_MAX)));
+    recordActivityToday();
   }
 
   // ---------- 퀴즈 ----------
@@ -1461,13 +1669,19 @@
 
     // 주제별 정답률
     const byTopic = {};
+    const byChapter = {};
     quizLog.forEach((log) => {
       const t = log.item.topic;
       byTopic[t] = byTopic[t] || { correct: 0, total: 0 };
       byTopic[t].total++;
       if (log.correct) byTopic[t].correct++;
+      const chId = "sec-" + slugify(log.item.chapter);
+      byChapter[chId] = byChapter[chId] || { correct: 0, total: 0 };
+      byChapter[chId].total++;
+      if (log.correct) byChapter[chId].correct++;
     });
     updateQuizHistory(byTopic);
+    updateChapterHistory(byChapter);
     recordWrongTracker(quizLog);
     const sessionTopics = new Set(quizLog.map((l) => l.item.topic));
     appendSessionLog({
@@ -1962,11 +2176,16 @@
     renderMockBreakdown(document.getElementById("mock-domain-breakdown"), byDomain, (d) => DOMAIN_LABELS[d], (d) => domainColor(Number(d)), false);
 
     const byTopic = {};
+    const byChapter = {};
     log.forEach((l) => {
       const t = l.item.topic;
       byTopic[t] = byTopic[t] || { correct: 0, total: 0 };
       byTopic[t].total++;
       if (l.correct) byTopic[t].correct++;
+      const chId = "sec-" + slugify(l.item.chapter);
+      byChapter[chId] = byChapter[chId] || { correct: 0, total: 0 };
+      byChapter[chId].total++;
+      if (l.correct) byChapter[chId].correct++;
     });
     renderMockBreakdown(document.getElementById("mock-topic-breakdown"), byTopic, (t) => topicLabel(t), (t) => domainColor(topicDomain(t)), true);
 
@@ -1989,6 +2208,7 @@
     });
 
     updateQuizHistory(byTopic);
+    updateChapterHistory(byChapter);
     recordWrongTracker(log);
     appendSessionLog({
       at: Date.now(),
@@ -2157,6 +2377,42 @@
     container.innerHTML = `<h4 class="analysis-subtitle">최근 5회 응시 추이 (주제만 다룬 세션 기준)</h4><div class="topic-heatmap-grid">${rowsHtml}</div>`;
   }
 
+  // 이미 테스트해 본 챕터 중 정답률이 낮은 것만 모은다 — "안 읽은 챕터"와 달리 응시 기록이 있는 챕터만 다룬다.
+  const WEAK_CHAPTER_THRESHOLD = 70;
+  const WEAK_CHAPTER_POOL_MAX = 20;
+  function renderWeakChapters() {
+    const container = document.getElementById("weak-chapters");
+    if (!container) return;
+    const history = loadChapterHistory();
+    const weak = Object.keys(history)
+      .map((chId) => ({ chId, entry: history[chId] }))
+      .filter((c) => CHAPTER_HEADING[c.chId] && c.entry.lastPct < WEAK_CHAPTER_THRESHOLD)
+      .sort((a, b) => a.entry.lastPct - b.entry.lastPct);
+
+    if (weak.length === 0) {
+      container.innerHTML = "";
+      return;
+    }
+
+    const rowsHtml = weak
+      .map((c) => {
+        const heading = CHAPTER_HEADING[c.chId];
+        const topicKey = CHAPTER_TOPIC[c.chId];
+        return `
+          <div class="analysis-row">
+            <span class="analysis-topic">${dotHtml(domainColor(topicDomain(topicKey)))}${heading}</span>
+            <span class="analysis-pct">퀴즈 ${c.entry.lastPct}%</span>
+            <button class="btn-sm" type="button" data-chapter-test-jump="${c.chId}">이 챕터 다시 테스트</button>
+          </div>
+        `;
+      })
+      .join("");
+    const reviewAllHtml =
+      weak.length > 1 ? `<button class="btn-outline" type="button" id="weak-chapters-review-all">약점 챕터 ${weak.length}곳 모아 풀기</button>` : "";
+
+    container.innerHTML = `<h4 class="analysis-subtitle">⚠️ 약점 챕터 (테스트 정답률 ${WEAK_CHAPTER_THRESHOLD}% 미만)</h4>${rowsHtml}${reviewAllHtml}`;
+  }
+
   // 안 읽은 챕터를 주제별로 묶어 접이식으로 보여준다 — 클릭하면 학습 자료 탭의 그 챕터로 정확히 이동.
   function renderUnreadChapters() {
     const container = document.getElementById("unread-chapters");
@@ -2257,6 +2513,22 @@
     return { delta: latest.pct - previous.pct };
   }
 
+  // 이미 추적 중인 데이터만으로 판정하는 달성 배지 — 새 콘텐츠 없이 기존 신호(스트릭/챕터테스트/문제풀이량/
+  // 모의고사 합격/완독/전체암기)를 조합한다.
+  function computeBadges(quizHistory) {
+    const totalQuizzed = Object.values(quizHistory).reduce((sum, e) => sum + e.total, 0);
+    const totalChapters = Object.values(STUDY_GUIDE_CHAPTERS).reduce((sum, arr) => sum + arr.length, 0);
+    const mockPassed = loadMockExamHistory().some((h) => h.passed);
+    return [
+      { icon: "🔥", label: "7일 연속 학습", earned: computeStreak() >= 7 },
+      { icon: "🎯", label: "첫 챕터 테스트 완료", earned: testedChapters.size >= 1 },
+      { icon: "💯", label: "100문제 이상 풀이", earned: totalQuizzed >= 100 },
+      { icon: "🏆", label: "모의고사 합격", earned: mockPassed },
+      { icon: "📚", label: "전체 챕터 완독", earned: readChapters.size >= totalChapters },
+      { icon: "🧠", label: "플래시카드 전체 암기", earned: mastered.size >= FLASHCARDS.length },
+    ];
+  }
+
   const TREND_ICON = { up: "▲", down: "▼", same: "―" };
 
   // 도메인 3개의 준비도를 삼각형 레이더 차트로 그린다(라이브러리 없이 순수 SVG).
@@ -2306,6 +2578,30 @@
     `;
   }
 
+  // 세션 기록(퀴즈/모의고사 등 모든 응시)의 점수를 시간순으로 이어 그리는 단순 스파크라인.
+  // 주제/모드를 가리지 않고 "전체적으로 오르고 있는지"만 대략 보여주는 용도라 정밀한 지표는 아니다.
+  function renderReadinessSparklineSvg(sessionLog) {
+    if (sessionLog.length < 2) return "";
+    const points = sessionLog.slice().reverse(); // 오래된 것부터
+    const w = 260;
+    const h = 46;
+    const pad = 4;
+    const stepX = points.length > 1 ? (w - pad * 2) / (points.length - 1) : 0;
+    const coords = points.map((p, i) => {
+      const x = pad + i * stepX;
+      const y = h - pad - (Math.max(0, Math.min(100, p.pct)) / 100) * (h - pad * 2);
+      return [x, y];
+    });
+    const pointsAttr = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+    const [lastX, lastY] = coords[coords.length - 1];
+    return `
+      <svg viewBox="0 0 ${w} ${h}" class="readiness-sparkline" role="img" aria-label="응시 점수 추이 스파크라인">
+        <polyline points="${pointsAttr}" class="readiness-sparkline-line"/>
+        <circle cx="${lastX}" cy="${lastY}" r="3" class="readiness-sparkline-dot"/>
+      </svg>
+    `;
+  }
+
   // 사용자가 직접 정하는 목표 점수(1000점 만점) — 현재 예상 준비도와의 갭을 보여주는 데 쓰인다.
   const GOAL_SCORE_KEY = "az900-goal-score-v1";
   function loadGoalScore() {
@@ -2323,6 +2619,105 @@
     saveGoalScore(Number.isFinite(v) && v > 0 ? Math.min(1000, v) : null);
     renderProgress();
   });
+
+  // 사용자가 직접 정하는 시험 예정일 — D-day 카운트다운에 쓰인다.
+  const EXAM_DATE_KEY = "az900-exam-date-v1";
+  function loadExamDate() {
+    return localStorage.getItem(EXAM_DATE_KEY) || null;
+  }
+  function saveExamDate(v) {
+    if (!v) localStorage.removeItem(EXAM_DATE_KEY);
+    else localStorage.setItem(EXAM_DATE_KEY, v);
+  }
+  function computeDday(examDateStr) {
+    if (!examDateStr) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const examDate = new Date(examDateStr + "T00:00:00");
+    return Math.round((examDate - today) / (1000 * 60 * 60 * 24));
+  }
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#exam-date-save")) return;
+    const input = document.getElementById("exam-date-input");
+    saveExamDate(input.value || null);
+    renderProgressHeadlineStats();
+  });
+
+  // 진행 상황 탭 상단에 항상 보이는 헤드라인 지표(연속 학습일 스트릭 + 시험 D-day) — 서브탭과 무관하게 노출.
+  function renderProgressHeadlineStats() {
+    const container = document.getElementById("progress-headline-stats");
+    if (!container) return;
+
+    const streak = computeStreak();
+    const streakHtml =
+      streak > 0
+        ? `<span class="headline-stat">🔥 <strong>${streak}일</strong> 연속 학습 중</span>`
+        : `<span class="headline-stat headline-stat-muted">오늘부터 연속 학습을 시작해보세요</span>`;
+
+    const examDate = loadExamDate();
+    const dday = computeDday(examDate);
+    const ddayLabel = dday === null ? "" : dday > 0 ? `D-${dday}` : dday === 0 ? "D-DAY" : `시험일 ${Math.abs(dday)}일 지남`;
+    const ddayTextHtml = dday !== null ? `<strong>${ddayLabel}</strong> · ` : "";
+    const ddayHtml = `
+      <span class="headline-stat headline-exam">
+        🗓️ ${ddayTextHtml}<input type="date" id="exam-date-input" value="${examDate || ""}">
+        <button class="btn-sm" type="button" id="exam-date-save">저장</button>
+      </span>
+    `;
+
+    container.innerHTML = streakHtml + ddayHtml;
+  }
+
+  // 응시 기록을 하루 4구간(새벽/오전/오후/저녁)으로 나눠 언제 주로 공부하는지 보여준다.
+  function renderSessionTimeHistogram(sessionLog) {
+    const container = document.getElementById("session-time-histogram");
+    if (!container) return;
+    if (sessionLog.length === 0) {
+      container.innerHTML = "";
+      return;
+    }
+    const buckets = [
+      { label: "새벽 (0-6시)", count: 0 },
+      { label: "오전 (6-12시)", count: 0 },
+      { label: "오후 (12-18시)", count: 0 },
+      { label: "저녁 (18-24시)", count: 0 },
+    ];
+    sessionLog.forEach((entry) => {
+      const hour = new Date(entry.at).getHours();
+      buckets[Math.floor(hour / 6)].count++;
+    });
+    const maxCount = Math.max(...buckets.map((b) => b.count), 1);
+    const rowsHtml = buckets
+      .map(
+        (b) => `
+          <div class="time-hist-row">
+            <span class="time-hist-label">${b.label}</span>
+            <div class="time-hist-bar-track"><div class="time-hist-bar-fill" style="width:${(b.count / maxCount) * 100}%"></div></div>
+            <span class="time-hist-count">${b.count}</span>
+          </div>
+        `
+      )
+      .join("");
+    container.innerHTML = `<h4 class="analysis-subtitle">응시 시간대 분포</h4>${rowsHtml}`;
+  }
+
+  // 최근 30일 학습 활동을 작은 칸으로 보여준다(GitHub 잔디 스타일의 단순화 버전) — 이력 서브탭에 배치.
+  function renderActivityStrip() {
+    const container = document.getElementById("activity-strip");
+    if (!container) return;
+    const days = [];
+    const cursor = new Date();
+    cursor.setDate(cursor.getDate() - 29);
+    for (let i = 0; i < 30; i++) {
+      const key = dateStr(cursor);
+      days.push({ active: activityDates.has(key), label: `${cursor.getMonth() + 1}/${cursor.getDate()}` });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    const cellsHtml = days
+      .map((d) => `<span class="activity-cell${d.active ? " activity-active" : ""}" title="${d.label}${d.active ? " · 학습함" : ""}"></span>`)
+      .join("");
+    container.innerHTML = `<h4 class="analysis-subtitle">최근 30일 학습 활동</h4><div class="activity-strip-cells">${cellsHtml}</div>`;
+  }
 
   function renderLearningAnalysis(quizHistory, sessionLog) {
     const container = document.getElementById("learning-analysis");
@@ -2351,6 +2746,8 @@
     const readinessHtml = readiness
       ? `<p class="analysis-readiness"><strong>${readiness.scaledScore}점</strong> / 1000점 <span class="analysis-readiness-sub">(누적 ${readiness.correct}/${readiness.total}문항 · ${readiness.pct}%) — 연습 문제 기준 예상 준비도</span></p>`
       : `<p class="analysis-readiness analysis-empty">아직 퀴즈 기록이 없어요. 몇 문제라도 풀어보면 예상 준비도가 표시돼요.</p>`;
+    const sparklineHtml = renderReadinessSparklineSvg(sessionLog);
+    const sparklineWrapHtml = sparklineHtml ? `<div class="readiness-sparkline-wrap">${sparklineHtml}</div>` : "";
 
     const goalScore = loadGoalScore();
     const goalGapHtml =
@@ -2418,6 +2815,20 @@
       ? `<p class="analysis-trend-highlight">${trendHighlightParts.join(" · ")}</p>`
       : "";
 
+    const badges = computeBadges(quizHistory);
+    const earnedCount = badges.filter((b) => b.earned).length;
+    const badgesHtml = `
+      <h4 class="analysis-subtitle">🏅 달성 배지 (${earnedCount}/${badges.length})</h4>
+      <div class="badge-grid">
+        ${badges
+          .map(
+            (b) =>
+              `<span class="badge-pill ${b.earned ? "badge-earned" : "badge-locked"}" title="${b.earned ? "달성!" : "아직 달성하지 못했어요"}">${b.icon} ${b.label}</span>`
+          )
+          .join("")}
+      </div>
+    `;
+
     const rowsHtml = needsWork.length
       ? needsWork
           .map((r, idx) => {
@@ -2443,13 +2854,23 @@
       : `<p class="analysis-empty">모든 주제가 양호해요. 꾸준히 복습만 이어가면 됩니다 🎉</p>`;
 
     container.innerHTML =
-      readinessHtml + goalRowHtml + domainHtml + wrongHtml + summaryHtml + strengthsHtml + trendHighlightHtml + rowsHtml;
+      readinessHtml +
+      sparklineWrapHtml +
+      goalRowHtml +
+      domainHtml +
+      wrongHtml +
+      summaryHtml +
+      strengthsHtml +
+      trendHighlightHtml +
+      badgesHtml +
+      rowsHtml;
   }
 
   function sessionModeLabel(mode) {
     if (mode === "wrong-review") return "오답 복습";
     if (mode === "mock-exam") return "모의고사";
     if (mode === "chapter-check") return "챕터 테스트";
+    if (mode === "chapter-weak-review") return "약점 챕터 복습";
     return "퀴즈";
   }
 
@@ -2534,11 +2955,15 @@
   function renderProgress() {
     const quizHistory = loadQuizHistory();
     const sessionLog = loadSessionLog();
+    renderProgressHeadlineStats();
     renderLearningAnalysis(quizHistory, sessionLog);
     renderTopicMastery(quizHistory);
     renderTopicHeatmap(sessionLog);
+    renderWeakChapters();
     renderUnreadChapters();
     renderSessionLog();
+    renderActivityStrip();
+    renderSessionTimeHistogram(sessionLog);
     renderStudyPlan();
   }
 
