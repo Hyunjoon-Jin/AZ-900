@@ -1352,7 +1352,7 @@ button {
   gap: 6px;
   margin-bottom: 1.4rem;
 }
-.day-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.day-col { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
 .day-chip {
   width: 100%;
   height: 40px;
@@ -1376,6 +1376,12 @@ button {
   font-weight: 700;
   color: var(--text-muted);
 }
+.day-chip-pct {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 
 .progress-summary { text-align: center; font-weight: 600; margin-bottom: 1rem; }
 
@@ -1393,16 +1399,38 @@ button {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
+.day-card-skipped { border-color: color-mix(in srgb, var(--critical) 40%, var(--border)); }
+.day-card-skipped-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--critical);
+  background: var(--critical-wash);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  margin-left: 0.5rem;
+}
 .day-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.6rem;
   margin-bottom: 0.65rem;
+  flex-wrap: wrap;
 }
-.day-card-head h3 { margin: 0; font-size: 1rem; display: flex; align-items: center; }
+.day-card-head h3 { margin: 0; font-size: 1rem; display: flex; align-items: center; flex-wrap: wrap; }
 .day-card .meter { width: 70px; }
 .day-card-head .meter-label { font-size: 0.75rem; }
+.day-card-toggle {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0.15rem 0.3rem;
+  flex-shrink: 0;
+}
+.day-card-toggle:hover { color: var(--accent); }
+.day-card-collapsed .day-item-row { display: none; }
 .day-item-row {
   display: flex;
   align-items: center;
@@ -1422,6 +1450,7 @@ button {
 .day-card input[type="checkbox"] { margin-top: 0.2rem; accent-color: var(--accent); width: 16px; height: 16px; }
 .day-card label.checked { color: var(--text-muted); text-decoration: line-through; }
 .day-item-jump { flex-shrink: 0; }
+.day-item-stat { color: var(--text-muted); font-size: 0.85rem; }
 .day-card label.day-item-auto { cursor: help; }
 .day-card label.day-item-auto input[type="checkbox"] { cursor: help; opacity: 0.7; }
 .day-item-auto-badge { flex-shrink: 0; font-size: 0.78rem; opacity: 0.85; }
@@ -1997,7 +2026,8 @@ button {
 @media (max-width: 420px) {
   .fc-arrow { width: 34px; height: 34px; }
   .flashcard { height: 220px; }
-  .day-overview { grid-template-columns: repeat(5, 1fr); }
+  .day-overview { grid-template-columns: repeat(5, 1fr); gap: 8px 6px; }
+  .day-chip { height: 44px; }
   .result-hero { flex-direction: column; text-align: center; }
   .topic-row .topic-name { width: 100px; }
   .markdown-view .md-diagram { padding: 0.85rem 0.7rem 0.75rem; }

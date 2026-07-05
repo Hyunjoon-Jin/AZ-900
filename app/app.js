@@ -3012,62 +3012,103 @@
   }
 
   // 10일 학습 계획 체크리스트 — 별도 탭에서 관리하며, 감지 가능한 항목은 자동으로 체크된다.
+  // 학습 계획 탭 상단에 Progress 탭의 스트릭/배지를 요약 노출 — 두 탭이 서로 남남처럼 느껴지지 않게 연결한다.
+  function renderStudyPlanHeadlineStats(quizHistory) {
+    const container = document.getElementById("studyplan-headline-stats");
+    if (!container) return;
+    const streak = computeStreak();
+    const streakHtml =
+      streak > 0
+        ? `<span class="headline-stat">🔥 <strong>${streak}일</strong> 연속 학습 중</span>`
+        : `<span class="headline-stat headline-stat-muted">오늘부터 연속 학습을 시작해보세요</span>`;
+    const badges = computeBadges(quizHistory);
+    const earnedCount = badges.filter((b) => b.earned).length;
+    const badgeHtml = `<span class="headline-stat"><button class="link-btn" type="button" data-goto-tab="progress">🏅 배지 ${earnedCount}/${badges.length}개 달성 →</button></span>`;
+    container.innerHTML = streakHtml + badgeHtml;
+  }
+
+  // 사용자가 이번 세션에서 직접 접었다 펼친 Day — 지정하지 않은 Day는 완료 여부(100%)로 기본값이 정해진다.
+  const studyPlanCollapseOverride = {};
+  // 학습 계획을 완전히 끝낸 순간(0→100% 전환)에만 한 번 축하하기 위한 이전 렌더의 전체 진행률.
+  let prevStudyPlanPct = null;
+
   function renderStudyPlan() {
     const quizHistory = loadQuizHistory();
+    renderStudyPlanHeadlineStats(quizHistory);
     const data = loadProgress();
     const container = document.getElementById("progress-days");
     const overviewEl = document.getElementById("day-overview");
     container.innerHTML = "";
     overviewEl.innerHTML = "";
-    let totalItems = 0;
-    let checkedItems = 0;
 
-    PLAN_DAYS.forEach((day) => {
+    // 1단계: 모든 Day의 체크 상태를 먼저 계산한다 — "건너뛴 Day" 판정(이후 Day에 진도가 있는데 이 Day만 0%)은
+    // 실제 달력 날짜 없이도 이 전체 배열을 봐야 알 수 있기 때문에, DOM을 그리기 전에 한 번에 계산해 둔다.
+    const dayStats = PLAN_DAYS.map((day) => {
       const itemChecks = day.items.map((itemText, idx) => {
         const auto = detectAutoCheck(itemText, quizHistory);
         const manual = !!data[`${day.day}-${idx}`];
         return { itemText, auto, checked: auto ? auto.checked || manual : manual };
       });
       const dayChecked = itemChecks.filter((c) => c.checked).length;
-      totalItems += day.items.length;
-      checkedItems += dayChecked;
       const dayPct = Math.round((dayChecked / day.items.length) * 100);
+      return { day, itemChecks, dayChecked, dayPct };
+    });
+    dayStats.forEach((stat, idx) => {
+      stat.skipped = stat.dayPct === 0 && dayStats.slice(idx + 1).some((later) => later.dayPct > 0);
+    });
+
+    let totalItems = 0;
+    let checkedItems = 0;
+    dayStats.forEach((stat) => {
+      totalItems += stat.day.items.length;
+      checkedItems += stat.dayChecked;
+    });
+
+    dayStats.forEach(({ day, itemChecks, dayChecked, dayPct, skipped }) => {
       const dColor = domainColor(day.domain);
 
-      // 상단 10일 미니 오버뷰 (클릭 시 해당 일차로 스크롤)
+      // 상단 10일 미니 오버뷰 (클릭 시 해당 일차로 스크롤) — 모바일에서 탭하기 편하도록 칩뿐 아니라
+      // 위아래 라벨을 포함한 칼럼 전체를 탭 영역으로 잡는다.
       const col = document.createElement("div");
       col.className = "day-col";
-      const chip = document.createElement("div");
-      chip.className = "day-chip";
-      chip.title = `Day ${day.day}: ${dayChecked}/${day.items.length}`;
-      chip.innerHTML = `<div class="day-chip-fill" style="height:${dayPct}%;background:${dColor}"></div>`;
-      chip.addEventListener("click", () => {
+      col.title = `Day ${day.day}: ${dayChecked}/${day.items.length}`;
+      col.addEventListener("click", () => {
         const target = document.getElementById(`day-card-${day.day}`);
         if (!target) return;
         target.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
         target.classList.add("pulse");
         setTimeout(() => target.classList.remove("pulse"), 900);
       });
+      const pctLabel = document.createElement("div");
+      pctLabel.className = "day-chip-pct";
+      pctLabel.textContent = `${dayPct}%`;
+      const chip = document.createElement("div");
+      chip.className = "day-chip";
+      chip.innerHTML = `<div class="day-chip-fill" style="height:${dayPct}%;background:${dColor}"></div>`;
       const label = document.createElement("div");
       label.className = "day-chip-label";
       label.textContent = day.day;
+      col.appendChild(pctLabel);
       col.appendChild(chip);
       col.appendChild(label);
       overviewEl.appendChild(col);
 
       // 일차 카드
+      const isCollapsed = studyPlanCollapseOverride[day.day] !== undefined ? studyPlanCollapseOverride[day.day] : dayPct === 100;
       const card = document.createElement("div");
-      card.className = "day-card";
+      card.className = "day-card" + (isCollapsed ? " day-card-collapsed" : "") + (skipped ? " day-card-skipped" : "");
       card.id = `day-card-${day.day}`;
 
       const head = document.createElement("div");
       head.className = "day-card-head";
+      const skippedBadge = skipped ? `<span class="day-card-skipped-badge" title="이후 일차는 진행했는데 이 Day는 아직 0%예요">건너뜀?</span>` : "";
       head.innerHTML = `
-        <h3>${dotHtml(dColor)}Day ${day.day} · ${day.title}</h3>
+        <h3>${dotHtml(dColor)}Day ${day.day} · ${day.title}${skippedBadge}</h3>
         <div class="meter-row" style="margin-bottom:0;">
           <div class="meter" role="progressbar" aria-label="Day ${day.day} 진행률"><div class="meter-fill" style="width:${dayPct}%"></div></div>
           <span class="meter-label">${dayChecked}/${day.items.length}</span>
         </div>
+        <button class="day-card-toggle" type="button" data-day="${day.day}" aria-label="${isCollapsed ? "펼치기" : "접기"}">${isCollapsed ? "▸" : "▾"}</button>
       `;
       card.appendChild(head);
 
@@ -3096,6 +3137,39 @@
         }
         itemLabel.appendChild(cb);
         itemLabel.appendChild(document.createTextNode(itemText));
+
+        // "플래시카드 'X'" / "퀴즈 'X'" 문장을 감지해 해당 기능으로 바로가는 버튼을 붙이고,
+        // 체크 여부와 무관하게 지금 실제 진행 상황(암기율/최근 점수)도 함께 보여준다.
+        const jumpMatch = itemText.match(/(플래시카드|퀴즈)\s*'([^']+)'/);
+        let jumpBtn = null;
+        if (jumpMatch) {
+          const targetTopic = TOPICS.find((t) => t.label === jumpMatch[2]);
+          if (targetTopic) {
+            const isFc = jumpMatch[1] === "플래시카드";
+            const statText = isFc
+              ? (() => {
+                  const fcCards = FLASHCARDS.filter((c) => c.topic === targetTopic.key);
+                  const fcKnown = fcCards.filter((c) => mastered.has(c.id)).length;
+                  return ` (${fcKnown}/${fcCards.length} 암기)`;
+                })()
+              : (() => {
+                  const entry = quizHistory[targetTopic.key];
+                  return entry ? ` (최근 ${entry.lastPct}%)` : " (기록 없음)";
+                })();
+            const statEl = document.createElement("span");
+            statEl.className = "day-item-stat";
+            statEl.textContent = statText;
+            itemLabel.appendChild(statEl);
+
+            jumpBtn = document.createElement("button");
+            jumpBtn.className = "btn-sm day-item-jump";
+            jumpBtn.type = "button";
+            jumpBtn.textContent = isFc ? "플래시카드로 →" : "퀴즈로 →";
+            jumpBtn.dataset.gotoTab = isFc ? "flashcards" : "quiz";
+            jumpBtn.dataset.gotoTopic = targetTopic.key;
+          }
+        }
+
         if (auto) {
           const autoBadge = document.createElement("span");
           autoBadge.className = "day-item-auto-badge";
@@ -3103,23 +3177,7 @@
           itemLabel.appendChild(autoBadge);
         }
         itemRow.appendChild(itemLabel);
-
-        // "플래시카드 'X'" / "퀴즈 'X'" 문장을 감지해 해당 기능으로 바로가는 버튼을 붙인다.
-        // 체크박스 토글과 섞이지 않도록 label과 형제 요소로 배치한다.
-        const jumpMatch = itemText.match(/(플래시카드|퀴즈)\s*'([^']+)'/);
-        if (jumpMatch) {
-          const targetTopic = TOPICS.find((t) => t.label === jumpMatch[2]);
-          if (targetTopic) {
-            const isFc = jumpMatch[1] === "플래시카드";
-            const jumpBtn = document.createElement("button");
-            jumpBtn.className = "btn-sm day-item-jump";
-            jumpBtn.type = "button";
-            jumpBtn.textContent = isFc ? "플래시카드로 →" : "퀴즈로 →";
-            jumpBtn.dataset.gotoTab = isFc ? "flashcards" : "quiz";
-            jumpBtn.dataset.gotoTopic = targetTopic.key;
-            itemRow.appendChild(jumpBtn);
-          }
-        }
+        if (jumpBtn) itemRow.appendChild(jumpBtn);
 
         card.appendChild(itemRow);
       });
@@ -3130,7 +3188,22 @@
     const pct = totalItems ? Math.round((checkedItems / totalItems) * 100) : 0;
     document.getElementById("progress-summary").textContent = `${checkedItems} / ${totalItems} 완료`;
     animateDonut(document.getElementById("progress-donut"), document.getElementById("progress-donut-value"), pct);
+
+    // 0→100% "전환"되는 순간에만 축하한다 — 이미 100%인 상태로 다시 렌더될 때마다 터지는 걸 막는다.
+    if (pct === 100 && prevStudyPlanPct !== null && prevStudyPlanPct < 100) launchConfetti();
+    prevStudyPlanPct = pct;
   }
+
+  // Day 카드 접기/펼치기 토글 — 완료된 Day는 기본으로 접혀 있지만 이번 세션 동안은 사용자가 원하는 대로 뒤집을 수 있다.
+  document.addEventListener("click", (e) => {
+    const toggleBtn = e.target.closest(".day-card-toggle");
+    if (!toggleBtn) return;
+    const dayNum = Number(toggleBtn.dataset.day);
+    const card = document.getElementById(`day-card-${dayNum}`);
+    const currentlyCollapsed = card ? card.classList.contains("day-card-collapsed") : false;
+    studyPlanCollapseOverride[dayNum] = !currentlyCollapsed;
+    renderStudyPlan();
+  });
 
   // 어느 탭에 있든 항상 보이는 "다음 학습 단계" 한 줄 안내 — renderLearningAnalysis와 동일한 우선순위 로직의 1순위만 노출.
   function computeNextStep() {
