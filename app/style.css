@@ -1172,6 +1172,9 @@ button {
 .day-card input[type="checkbox"] { margin-top: 0.2rem; accent-color: var(--accent); width: 16px; height: 16px; }
 .day-card label.checked { color: var(--text-muted); text-decoration: line-through; }
 .day-item-jump { flex-shrink: 0; }
+.day-card label.day-item-auto { cursor: help; }
+.day-card label.day-item-auto input[type="checkbox"] { cursor: help; opacity: 0.7; }
+.day-item-auto-badge { flex-shrink: 0; font-size: 0.78rem; opacity: 0.85; }
 
 .hidden { display: none !important; }
 

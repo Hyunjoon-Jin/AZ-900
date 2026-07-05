@@ -68,6 +68,7 @@
       if (activeTab === "leveltest") refreshLevelIntro();
       if (activeTab === "materials") loadMaterialsDoc(currentMaterialsDoc);
       if (activeTab === "progress") renderProgress();
+      if (activeTab === "studyplan") renderStudyPlan();
       if (activeTab === "quiz") refreshWrongReviewButton();
       if (activeTab === "mockexam") renderMockExamSetup();
       renderNextStepBar();
@@ -2152,6 +2153,56 @@
     renderLearningAnalysis(quizHistory, loadSessionLog());
     renderTopicMastery(quizHistory);
     renderSessionLog();
+    renderStudyPlan();
+  }
+
+  // 체크리스트 문구에서 이미 추적 중인 신호(플래시카드 암기/퀴즈 점수/모의고사 점수)를 감지해 자동 체크 여부를 판단한다.
+  // 해당 신호가 없는 일반 항목은 null을 반환해 기존처럼 수동 체크로 남긴다.
+  function detectAutoCheck(itemText, quizHistory) {
+    const fcMatch = itemText.match(/플래시카드\s*'([^']+)'/);
+    if (fcMatch) {
+      const topic = TOPICS.find((t) => t.label === fcMatch[1]);
+      if (!topic) return null;
+      const known = FLASHCARDS.filter((c) => c.topic === topic.key && mastered.has(c.id)).length;
+      return {
+        checked: known > 0,
+        reason: known > 0 ? `'${topic.label}' 플래시카드 ${known}장 암기 완료 기록 감지` : "이 주제 플래시카드를 암기 완료로 표시하면 자동 체크돼요",
+      };
+    }
+
+    const quizMatch = itemText.match(/퀴즈\s*'([^']+)'\s*세트\s*풀이(?:\s*\(목표\s*(\d+)%\+?\))?/);
+    if (quizMatch) {
+      const topic = TOPICS.find((t) => t.label === quizMatch[1]);
+      if (!topic) return null;
+      const target = quizMatch[2] ? Number(quizMatch[2]) : null;
+      const entry = quizHistory[topic.key];
+      const met = !!entry && (target === null || entry.lastPct >= target);
+      const reason = met
+        ? `'${topic.label}' 퀴즈 최근 점수 ${entry.lastPct}% 감지`
+        : target !== null
+        ? `이 주제 퀴즈에서 ${target}% 이상 받으면 자동 체크돼요`
+        : "이 주제 퀴즈를 한 번 풀면 자동 체크돼요";
+      return { checked: met, reason };
+    }
+
+    if (/종합\s*모의고사\s*\d+/.test(itemText)) {
+      const targetMatch = itemText.match(/목표\s*(\d+)%/);
+      const target = targetMatch ? Number(targetMatch[1]) : null;
+      const qualifying = loadMockExamHistory().find((h) => target === null || h.score >= target * 10);
+      const reason = qualifying
+        ? `모의고사 ${qualifying.score}점 기록 감지`
+        : target !== null
+        ? `모의고사에서 ${target}% (${target * 10}점) 이상 받으면 자동 체크돼요`
+        : "모의고사를 한 번 치르면 자동 체크돼요";
+      return { checked: !!qualifying, reason };
+    }
+
+    return null;
+  }
+
+  // 10일 학습 계획 체크리스트 — 별도 탭에서 관리하며, 감지 가능한 항목은 자동으로 체크된다.
+  function renderStudyPlan() {
+    const quizHistory = loadQuizHistory();
     const data = loadProgress();
     const container = document.getElementById("progress-days");
     const overviewEl = document.getElementById("day-overview");
@@ -2161,7 +2212,12 @@
     let checkedItems = 0;
 
     PLAN_DAYS.forEach((day) => {
-      const dayChecked = day.items.filter((_, idx) => data[`${day.day}-${idx}`]).length;
+      const itemChecks = day.items.map((itemText, idx) => {
+        const auto = detectAutoCheck(itemText, quizHistory);
+        const manual = !!data[`${day.day}-${idx}`];
+        return { itemText, auto, checked: auto ? auto.checked || manual : manual };
+      });
+      const dayChecked = itemChecks.filter((c) => c.checked).length;
       totalItems += day.items.length;
       checkedItems += dayChecked;
       const dayPct = Math.round((dayChecked / day.items.length) * 100);
@@ -2204,9 +2260,8 @@
       `;
       card.appendChild(head);
 
-      day.items.forEach((itemText, idx) => {
+      itemChecks.forEach(({ itemText, auto, checked }, idx) => {
         const itemKey = `${day.day}-${idx}`;
-        const checked = !!data[itemKey];
 
         const itemRow = document.createElement("div");
         itemRow.className = "day-item-row";
@@ -2216,14 +2271,26 @@
         const cb = document.createElement("input");
         cb.type = "checkbox";
         cb.checked = checked;
-        cb.addEventListener("change", () => {
-          const d = loadProgress();
-          d[itemKey] = cb.checked;
-          saveProgress(d);
-          renderProgress();
-        });
+        if (auto) {
+          cb.disabled = true;
+          itemLabel.classList.add("day-item-auto");
+          itemLabel.title = auto.reason;
+        } else {
+          cb.addEventListener("change", () => {
+            const d = loadProgress();
+            d[itemKey] = cb.checked;
+            saveProgress(d);
+            renderStudyPlan();
+          });
+        }
         itemLabel.appendChild(cb);
         itemLabel.appendChild(document.createTextNode(itemText));
+        if (auto) {
+          const autoBadge = document.createElement("span");
+          autoBadge.className = "day-item-auto-badge";
+          autoBadge.textContent = "🤖";
+          itemLabel.appendChild(autoBadge);
+        }
         itemRow.appendChild(itemLabel);
 
         // "플래시카드 'X'" / "퀴즈 'X'" 문장을 감지해 해당 기능으로 바로가는 버튼을 붙인다.
