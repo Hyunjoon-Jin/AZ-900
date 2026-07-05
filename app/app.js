@@ -73,6 +73,7 @@
       if (activeTab === "studyplan") renderStudyPlan();
       if (activeTab === "quiz") refreshWrongReviewButton();
       if (activeTab === "mockexam") renderMockExamSetup();
+      if (activeTab === "glossary") renderGlossaryTab();
       renderNextStepBar();
       const fab = document.getElementById("materials-back-to-top");
       if (fab && activeTab !== "materials") fab.hidden = true;
@@ -427,6 +428,44 @@
   function mdInlineBody(text, seen) {
     return wrapGlossaryHtml(mdInline(text), seen);
   }
+
+  // 용어집 탭 — 교재에 흩어져 있는 용어 툴팁과 같은 GLOSSARY 데이터를 한 곳에 모아 검색 가능한 목록으로 보여준다.
+  // 검색어는 탭을 나갔다 다시 들어와도 유지되도록 모듈 스코프에 둔다.
+  let glossarySearchQuery = "";
+  function renderGlossaryTab() {
+    const listEl = document.getElementById("glossary-list");
+    const countEl = document.getElementById("glossary-count");
+    if (!listEl) return;
+    const q = glossarySearchQuery.trim().toLowerCase();
+    const entries = GLOSSARY_TERMS.slice()
+      .sort((a, b) => a.localeCompare(b, "ko"))
+      .filter((term) => !q || term.toLowerCase().includes(q) || GLOSSARY[term].toLowerCase().includes(q));
+
+    if (countEl) {
+      countEl.textContent = q
+        ? `총 ${GLOSSARY_TERMS.length}개 중 ${entries.length}개 일치`
+        : `총 ${GLOSSARY_TERMS.length}개 용어`;
+    }
+
+    listEl.innerHTML = entries.length
+      ? entries
+          .map(
+            (term) => `
+              <div class="glossary-card">
+                <div class="glossary-term-head">${escapeHtml(term)}</div>
+                <div class="glossary-term-def">${escapeHtml(GLOSSARY[term])}</div>
+              </div>
+            `
+          )
+          .join("")
+      : `<p class="hint">일치하는 용어가 없어요.</p>`;
+  }
+
+  document.addEventListener("input", (e) => {
+    if (e.target.id !== "glossary-search") return;
+    glossarySearchQuery = e.target.value;
+    renderGlossaryTab();
+  });
 
   function slugify(text) {
     return text

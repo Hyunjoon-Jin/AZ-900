@@ -1792,6 +1792,42 @@ button {
   border-top-color: transparent;
   border-bottom-color: var(--text-primary);
 }
+
+.glossary-search-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 360px;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9rem;
+}
+.glossary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.glossary-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.85rem 1rem;
+  box-shadow: var(--shadow-sm);
+}
+.glossary-term-head {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.3rem;
+}
+.glossary-term-def {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .markdown-view h3 { font-size: 1.05rem; margin: 1.4rem 0 0.6rem; }
 .markdown-view h4 { font-size: 0.95rem; margin: 1.1rem 0 0.5rem; color: var(--text-secondary); }
 .markdown-view p { margin: 0 0 0.9rem; color: var(--text-secondary); }
