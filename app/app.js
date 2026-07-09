@@ -74,7 +74,10 @@
       if (activeTab === "quiz") refreshWrongReviewButton();
       if (activeTab === "mockexam") renderMockExamSetup();
       if (activeTab === "glossary") renderGlossaryTab();
+      // 학습 계획 탭으로 돌아온 순간(탭 바를 직접 클릭했든, 아래 이어서 진행 바의 버튼을 눌렀든) 흐름을 "마쳤다"고 본다.
+      if (activeTab === "studyplan") studyPlanFlowContext = null;
       renderNextStepBar();
+      renderStudyPlanFlowBar();
       const fab = document.getElementById("materials-back-to-top");
       if (fab && activeTab !== "materials") fab.hidden = true;
       if (activeTab !== "materials") {
@@ -111,6 +114,10 @@
     if (!el) return;
     const tab = el.dataset.gotoTab;
     const topic = el.dataset.gotoTopic;
+    const day = el.dataset.gotoDay;
+    // data-goto-day가 있는 버튼(학습 계획의 항목 바로가기)만 "지금 Day N 흐름 중"으로 기록한다 —
+    // 탭 전환보다 먼저 설정해야 이 클릭으로 이어지는 renderStudyPlanFlowBar()가 최신 상태를 그린다.
+    if (day) studyPlanFlowContext = { day: Number(day) };
     const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
     if (btn) btn.click();
     if (topic) applyTopicJump(tab, topic);
@@ -265,7 +272,9 @@
     }
   });
 
-  // 플래시카드/퀴즈/학습 자료 탭으로 "문맥 있게" 이동한다 (필터링까지만, 실행은 사용자가 직접).
+  // 플래시카드/퀴즈/학습 자료 탭으로 "문맥 있게" 이동한다. 플래시카드는 덱을 바로 불러오고,
+  // 퀴즈도 같은 흐름으로 맞추기 위해 설정 화면에서 멈추지 않고 기존 "퀴즈 시작" 버튼을 그대로 눌러 즉시 시작한다
+  // (탭을 여러 번 오가며 매번 다시 시작 버튼을 눌러야 하는 번거로움을 없애는 것 — 문항 수 등 기존 설정값은 그대로 존중한다).
   function applyTopicJump(tab, topic) {
     if (!topic) return;
     if (tab === "flashcards") {
@@ -273,9 +282,7 @@
       loadFcDeck();
     } else if (tab === "quiz") {
       quizTopicSel.value = topic;
-      quizPlay.classList.add("hidden");
-      quizResult.classList.add("hidden");
-      quizSetup.classList.remove("hidden");
+      document.getElementById("quiz-start").click();
     } else if (tab === "materials") {
       document.querySelectorAll(".materials-switch-btn").forEach((b) => {
         b.classList.toggle("active", b.dataset.doc === "study-guide");
@@ -1408,6 +1415,7 @@
     } else {
       fcAdvance();
     }
+    renderStudyPlanFlowBar();
   });
   document.getElementById("fc-again").addEventListener("click", () => {
     if (fcDeck.length === 0) return;
@@ -1736,6 +1744,7 @@
       saveTestedChapters(testedChapters);
       applyChapterStepState(materialsBodyEl);
     }
+    renderStudyPlanFlowBar();
     refreshWrongReviewButton();
     const breakdownEl = document.getElementById("quiz-topic-breakdown");
     breakdownEl.innerHTML = "";
@@ -3180,6 +3189,16 @@
     return TOPICS.filter((t) => classifyTopicStatus(computeTopicStats(t, quizHistory).quizPct) === "weak").map((t) => t.label);
   }
 
+  // "플래시카드 'X'" / "퀴즈 'X'" 문구에서 바로가기 대상(탭/주제)을 추출한다. 없으면 null.
+  // 오늘의 학습 카드/전체 Day 카드/이어서 진행 바가 모두 이 판정을 공유해 서로 어긋나지 않게 한다.
+  function matchStudyPlanJumpTarget(itemText) {
+    const m = itemText.match(/(플래시카드|퀴즈)\s*'([^']+)'/);
+    if (!m) return null;
+    const topic = TOPICS.find((t) => t.label === m[2]);
+    if (!topic) return null;
+    return { tab: m[1] === "플래시카드" ? "flashcards" : "quiz", topicKey: topic.key, isFc: m[1] === "플래시카드" };
+  }
+
   // Day 번호 → 그 Day가 주로 다루는 주제 키. Day 7(복습+모의고사)은 여러 주제가 섞여 있어 제외한다.
   // PLAN_DAYS 항목 자체엔 주제 참조가 없으므로, Day 제목을 기준으로 사람이 직접 매핑해 둔 힌트다.
   const DAY_TOPIC_HINT = {
@@ -3327,6 +3346,40 @@
   // 학습 계획을 완전히 끝낸 순간(0→100% 전환)에만 한 번 축하하기 위한 이전 렌더의 전체 진행률.
   let prevStudyPlanPct = null;
 
+  // 학습 계획의 항목 바로가기로 플래시카드/퀴즈에 넘어온 뒤에도, 탭을 오가며 다음 항목을 직접 찾지 않아도
+  // 되도록 "지금 Day N 흐름 중"임을 기록해 둔다. data-goto-day가 있는 버튼 클릭에서만 설정되고,
+  // 학습 계획 탭으로 돌아오면(탭 클릭이든 이 바의 버튼이든) 비운다.
+  let studyPlanFlowContext = null;
+  function renderStudyPlanFlowBar() {
+    const el = document.getElementById("studyplan-flow-bar");
+    if (!el) return;
+    if (!studyPlanFlowContext || activeTab === "studyplan") {
+      el.innerHTML = "";
+      return;
+    }
+    const quizHistory = loadQuizHistory();
+    const currentPlanDay = computeCurrentPlanDay(loadStudyPlanStart());
+    const dayStats = computeStudyPlanDayStats(quizHistory, currentPlanDay);
+    const stat = dayStats.find((s) => s.day.day === studyPlanFlowContext.day);
+    if (!stat) {
+      el.innerHTML = "";
+      return;
+    }
+    const returnBtnHtml = `<button class="btn-sm" type="button" data-goto-tab="studyplan" data-scroll-to-day="${stat.day.day}">학습 계획으로 →</button>`;
+    if (stat.dayPct === 100) {
+      el.innerHTML = `<span>🎉 Day ${stat.day.day} 완료!</span>${returnBtnHtml}`;
+      return;
+    }
+    const nextItem = stat.itemChecks.find((c) => !c.checked);
+    const jumpTarget = nextItem ? matchStudyPlanJumpTarget(nextItem.itemText) : null;
+    const nextHtml = jumpTarget
+      ? `다음: <button class="btn-sm" type="button" data-goto-tab="${jumpTarget.tab}" data-goto-topic="${jumpTarget.topicKey}" data-goto-day="${stat.day.day}">${nextItem.itemText} →</button>`
+      : nextItem
+      ? `다음 항목은 학습 계획에서 직접 확인해주세요.`
+      : "";
+    el.innerHTML = `<span>📋 Day ${stat.day.day} 진행 중 (${stat.dayChecked}/${stat.itemChecks.length})</span>${nextHtml}${returnBtnHtml}`;
+  }
+
   // Day별 체크 상태 계산 — renderStudyPlan()과 공유용 요약(클립보드 복사)에서 동일한 숫자를 써야 하므로 공용 함수로 뺐다.
   // "건너뛴 Day" 판정(이후 Day에 진도가 있는데 이 Day만 0%)은 실제 달력 날짜 없이도 전체 배열을 봐야 알 수 있어
   // 두 단계로 나눠 계산한다. 사용자가 추가한 커스텀 메모도 일반 항목과 동일하게 진행률에 포함시킨다.
@@ -3433,16 +3486,55 @@
             ? `<div class="today-plan-card">🏁 10일 계획 기간이 지났어요. 아래에서 남은 항목을 마저 확인해보세요.</div>`
             : "";
       } else {
-        const itemsHtml = todayStat.itemChecks
-          .map((c) => `<li class="${c.checked ? "today-plan-item-done" : ""}">${c.itemText}</li>`)
-          .join("");
         todayCardEl.innerHTML = `
           <div class="today-plan-card">
             <h4>📌 오늘은 Day ${todayStat.day.day} · ${todayStat.day.title} (${todayStat.dayChecked}/${todayStat.itemChecks.length})</h4>
-            <ul class="today-plan-items">${itemsHtml}</ul>
+            <ul class="today-plan-items" id="today-plan-items"></ul>
             <button class="btn-sm" type="button" data-scroll-to-day="${todayStat.day.day}">Day ${todayStat.day.day} 카드로 이동</button>
           </div>
         `;
+        // 전체 Day 카드까지 스크롤하지 않아도 바로 체크/이동할 수 있도록, 여기서도 동일한 체크박스/바로가기 버튼을 붙인다.
+        const todayListEl = document.getElementById("today-plan-items");
+        todayStat.itemChecks.forEach(({ itemText, auto, checked, isNote, noteId }, idx) => {
+          const li = document.createElement("li");
+          if (checked) li.classList.add("today-plan-item-done");
+
+          const label = document.createElement("label");
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = checked;
+          if (isNote) {
+            cb.dataset.noteToggle = noteId;
+            cb.dataset.day = todayStat.day.day;
+          } else if (auto) {
+            cb.disabled = true;
+            label.classList.add("day-item-auto");
+            label.title = auto.reason;
+          } else {
+            cb.addEventListener("change", () => {
+              const d = loadProgress();
+              d[`${todayStat.day.day}-${idx}`] = cb.checked;
+              saveProgress(d);
+              renderStudyPlan();
+            });
+          }
+          label.appendChild(cb);
+          label.appendChild(document.createTextNode(itemText));
+          li.appendChild(label);
+
+          const jumpTarget = !checked ? matchStudyPlanJumpTarget(itemText) : null;
+          if (jumpTarget) {
+            const jumpBtn = document.createElement("button");
+            jumpBtn.className = "btn-sm day-item-jump";
+            jumpBtn.type = "button";
+            jumpBtn.textContent = jumpTarget.isFc ? "플래시카드로 →" : "퀴즈로 →";
+            jumpBtn.dataset.gotoTab = jumpTarget.tab;
+            jumpBtn.dataset.gotoTopic = jumpTarget.topicKey;
+            jumpBtn.dataset.gotoDay = todayStat.day.day;
+            li.appendChild(jumpBtn);
+          }
+          todayListEl.appendChild(li);
+        });
       }
     }
 
@@ -3564,34 +3656,31 @@
 
         // "플래시카드 'X'" / "퀴즈 'X'" 문장을 감지해 해당 기능으로 바로가는 버튼을 붙이고,
         // 체크 여부와 무관하게 지금 실제 진행 상황(암기율/최근 점수)도 함께 보여준다.
-        const jumpMatch = itemText.match(/(플래시카드|퀴즈)\s*'([^']+)'/);
+        const jumpTarget = matchStudyPlanJumpTarget(itemText);
         let jumpBtn = null;
-        if (jumpMatch) {
-          const targetTopic = TOPICS.find((t) => t.label === jumpMatch[2]);
-          if (targetTopic) {
-            const isFc = jumpMatch[1] === "플래시카드";
-            const statText = isFc
-              ? (() => {
-                  const fcCards = FLASHCARDS.filter((c) => c.topic === targetTopic.key);
-                  const fcKnown = fcCards.filter((c) => mastered.has(c.id)).length;
-                  return ` (${fcKnown}/${fcCards.length} 암기)`;
-                })()
-              : (() => {
-                  const entry = quizHistory[targetTopic.key];
-                  return entry ? ` (최근 ${entry.lastPct}%)` : " (기록 없음)";
-                })();
-            const statEl = document.createElement("span");
-            statEl.className = "day-item-stat";
-            statEl.textContent = statText;
-            itemLabel.appendChild(statEl);
+        if (jumpTarget) {
+          const statText = jumpTarget.isFc
+            ? (() => {
+                const fcCards = FLASHCARDS.filter((c) => c.topic === jumpTarget.topicKey);
+                const fcKnown = fcCards.filter((c) => mastered.has(c.id)).length;
+                return ` (${fcKnown}/${fcCards.length} 암기)`;
+              })()
+            : (() => {
+                const entry = quizHistory[jumpTarget.topicKey];
+                return entry ? ` (최근 ${entry.lastPct}%)` : " (기록 없음)";
+              })();
+          const statEl = document.createElement("span");
+          statEl.className = "day-item-stat";
+          statEl.textContent = statText;
+          itemLabel.appendChild(statEl);
 
-            jumpBtn = document.createElement("button");
-            jumpBtn.className = "btn-sm day-item-jump";
-            jumpBtn.type = "button";
-            jumpBtn.textContent = isFc ? "플래시카드로 →" : "퀴즈로 →";
-            jumpBtn.dataset.gotoTab = isFc ? "flashcards" : "quiz";
-            jumpBtn.dataset.gotoTopic = targetTopic.key;
-          }
+          jumpBtn = document.createElement("button");
+          jumpBtn.className = "btn-sm day-item-jump";
+          jumpBtn.type = "button";
+          jumpBtn.textContent = jumpTarget.isFc ? "플래시카드로 →" : "퀴즈로 →";
+          jumpBtn.dataset.gotoTab = jumpTarget.tab;
+          jumpBtn.dataset.gotoTopic = jumpTarget.topicKey;
+          jumpBtn.dataset.gotoDay = day.day;
         }
 
         // 목표 %가 명시된 퀴즈 항목은, 아직 완료 전이라면 그 목표대로 풀었을 때 전체 점수가 얼마나 오르는지 미리 보여준다.

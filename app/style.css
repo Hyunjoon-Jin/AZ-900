@@ -174,6 +174,24 @@ body::before {
   .next-step-text { white-space: normal; }
 }
 
+.studyplan-flow-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding: 0.55rem 1rem;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.studyplan-flow-bar:empty {
+  display: none;
+  padding: 0;
+  border-top: none;
+}
+.studyplan-flow-bar .btn-sm { flex-shrink: 0; }
+
 /* ---------- Header ---------- */
 .app-header {
   position: relative;
@@ -886,9 +904,16 @@ button {
   margin-bottom: 1.2rem;
 }
 .today-plan-card h4 { margin: 0 0 0.5rem; font-size: 0.95rem; }
-.today-plan-items { margin: 0 0 0.7rem; padding-left: 1.2rem; font-size: 0.88rem; }
-.today-plan-items li { margin-bottom: 0.25rem; }
-.today-plan-items li.today-plan-item-done { color: var(--text-muted); text-decoration: line-through; }
+.today-plan-items { margin: 0 0 0.7rem; padding-left: 0; list-style: none; font-size: 0.88rem; }
+.today-plan-items li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+.today-plan-items li label { display: flex; align-items: center; gap: 0.4rem; flex: 1; min-width: 0; }
+.today-plan-items li input[type="checkbox"] { accent-color: var(--accent); flex-shrink: 0; }
+.today-plan-items li.today-plan-item-done label { color: var(--text-muted); text-decoration: line-through; }
 
 .overdue-items-details {
   border: 1px solid color-mix(in srgb, var(--critical) 35%, var(--border));
