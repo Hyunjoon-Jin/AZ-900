@@ -2002,15 +2002,15 @@ const PLAN_DAYS = [
   { day: 1, domain: 1, title: "클라우드 개념 기초", items: [
     "클라우드 이점: HA/확장성/탄력성/민첩성/DR",
     "비용 모델: CapEx vs OpEx, 종량제",
-    "클라우드 vs 온프레미스 비교표 작성",
-    "Microsoft Learn '클라우드 컴퓨팅 개념' 완료",
+    "클라우드 배포 모델(퍼블릭/프라이빗/하이브리드) 이해",
+    "SLA(서비스 수준 계약)와 가동 시간 보장 이해",
     "플래시카드 '클라우드 개념' 1회 학습",
   ]},
   { day: 2, domain: 1, title: "서비스/배포 모델", items: [
     "IaaS/PaaS/SaaS 정의 및 책임 분담 비교",
     "공유 책임 모델 이해",
     "배포 모델: 퍼블릭/프라이빗/하이브리드/멀티클라우드",
-    "서비스 모델별 Azure 서비스 예시 정리",
+    "클라우드 서비스 모델(IaaS/PaaS/SaaS) 챕터 복습",
     "퀴즈 '클라우드 개념' 세트 풀이 (목표 80%+)",
   ]},
   { day: 3, domain: 2, title: "Azure 핵심 아키텍처", items: [
@@ -2044,7 +2044,7 @@ const PLAN_DAYS = [
   { day: 7, domain: 'mixed', title: "복습 + 모의고사 1", items: [
     "Day 1~6 플래시카드 재학습(오답 위주)",
     "종합 모의고사 1 (도메인 1~2, 목표 80%+)",
-    "오답 노트 정리",
+    "틀린 문제 다시 풀기 (오답 복습)",
     "취약 주제 재학습",
   ]},
   { day: 8, domain: 3, title: "ID/액세스/보안", items: [
@@ -2066,7 +2066,7 @@ const PLAN_DAYS = [
     "Azure Monitor, Log Analytics, Advisor, Service Health",
     "Portal vs CLI vs PowerShell vs Cloud Shell",
     "종합 모의고사 2 (전 도메인, 목표 85%+)",
-    "전체 오답 노트 최종 복습",
-    "시험 응시 환경/절차 확인",
+    "전체 오답 문제 최종 복습",
+    "진행 상황 탭에서 전체 준비도·도메인별 점수 최종 점검",
   ]},
 ];
