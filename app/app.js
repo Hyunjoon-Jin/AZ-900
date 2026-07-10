@@ -3840,16 +3840,131 @@
     el.remove();
   }
 
-  // 항목 문구로 이 단계가 어떤 종류인지 판정한다 — matchStudyPlanJumpTarget/모의고사 정규식/
-  // DAY_TOPIC_HINT까지, detectAutoCheck와 완전히 같은 우선순위로 이미 존재하는 판정을 그대로 쓴다.
-  function classifyGuidedStep(itemText, dayNumber) {
+  // Day-항목(day-idx) → STUDY_GUIDE_CHAPTERS의 정확한 헤딩 문구 목록. 가이드 모드에서 개념 항목을 볼 때
+  // "학습 자료 탭 전체를 열고 아무 데나 스크롤"하는 대신, 그 항목에 해당하는 챕터만 잘라서 보여주기 위한
+  // 매핑이다 — 항목 텍스트와 STUDY_GUIDE_CHAPTERS를 직접 대조해 손으로 만들었다(새 콘텐츠 작성 아님, 기존
+  // 챕터 제목을 가리키는 참조일 뿐). 여러 챕터에 걸친 항목은 문서 순서상 첫 챕터~마지막 챕터까지를 통째로
+  // 보여준다(그 사이에 살짝 무관한 챕터가 끼어도, 전체 문서보다는 훨씬 좁혀진 범위라 문제 없음).
+  // 외부 자료 참조(Microsoft Learn 등), 비교표 작성 같은 순수 실습, 시험 당일 확인 같은 항목은 매핑에서
+  // 빠지며 — 그런 항목은 이 표에 없으면 자동으로 "수동 확인" 카드로 표시된다.
+  const GUIDED_ITEM_CHAPTERS = {
+    "1-0": ["클라우드의 핵심 이점", "확장 방식: 수직 확장(Scale Up) vs 수평 확장(Scale Out)"],
+    "1-1": ["비용 모델과 계산 도구"],
+    "2-0": ["클라우드 서비스 모델: IaaS, PaaS, SaaS"],
+    "2-1": ["클라우드 서비스 모델: IaaS, PaaS, SaaS"],
+    "2-2": ["클라우드 배포 모델"],
+    "2-3": ["클라우드 서비스 모델: IaaS, PaaS, SaaS"],
+    "3-0": ["물리적 인프라: 리전과 데이터센터"],
+    "3-1": ["가용성 보장 메커니즘"],
+    "3-2": ["리소스 관리 계층 구조"],
+    "3-3": ["인프라를 코드로 관리하기"],
+    "4-0": ["가상 머신 기반 컴퓨팅"],
+    "4-1": ["컨테이너 기반 컴퓨팅"],
+    "4-2": ["서버리스와 자동화 워크플로"],
+    "4-3": ["가상 데스크톱 — 내 컴퓨터 화면 자체를 빌리다"],
+    "5-0": ["가상 네트워크의 기초"],
+    "5-1": ["하이브리드 연결"],
+    "5-2": ["부하 분산과 트래픽 라우팅", "DNS와 이름 확인"],
+    "5-3": ["고급 연결 및 진단 도구"],
+    "6-0": ["Blob 스토리지", "디스크와 파일 스토리지"],
+    "6-1": ["액세스 계층과 수명 주기 관리"],
+    "6-2": ["복제 옵션과 데이터 내구성"],
+    "6-3": ["대용량 데이터 이전 도구"],
+    "8-0": ["인증과 인가 — 헷갈리기 쉽지만 완전히 다른 개념", "Microsoft Entra ID: 클라우드 세상의 신분증 발급 기관"],
+    "8-1": ["접근 제어: RBAC와 조건부 액세스"],
+    "8-2": ["접근 제어: RBAC와 조건부 액세스"],
+    "8-3": ["제로 트러스트와 심층 방어"],
+    "8-4": ["보안 모니터링과 비밀 관리"],
+    "9-0": ["비용 산정하기 — Pricing Calculator와 TCO Calculator"],
+    "9-1": ["실제로 얼마 나갔지? 비용 모니터링과 관리", "리소스에 이름표 붙이기 — 태그"],
+    "9-2": ["규칙을 강제하는 관리인 — Azure Policy", "표준화된 매장 세팅 — Azure Blueprints"],
+    "9-3": ["클라우드 도입의 큰 그림 — CAF"],
+    "10-0": [
+      "Azure Monitor — 클라우드 세상의 종합 건강 체크 시스템",
+      "Azure Advisor — 우리 아파트 전체를 봐주는 건강검진 컨설턴트",
+      "서비스 상태 확인: Service Health vs Azure Status",
+    ],
+    "10-1": ["관리 인터페이스: Portal / CLI / PowerShell / Cloud Shell"],
+  };
+
+  // 항목 문구로 이 단계가 어떤 종류인지 판정한다. 플래시카드/퀴즈/모의고사 패턴은 matchStudyPlanJumpTarget/
+  // 정규식으로, 나머지 개념 항목은 DAY_TOPIC_HINT(대략적인 주제)가 아니라 GUIDED_ITEM_CHAPTERS(정확한 챕터)로
+  // 판정한다 — DAY_TOPIC_HINT는 detectAutoCheck의 읽음 50%↑ 자동 체크 판정에서만 계속 쓰인다(완료 조건은
+  // 그대로, 여기서는 "무엇을 보여줄지"만 더 정밀하게 고른다). 매핑에 없는 항목(외부 자료 참조, 순수 실습,
+  // 시험 당일 확인 등)은 Day 7의 수동 항목과 동일하게 취급한다.
+  function classifyGuidedStep(itemText, dayNumber, idx) {
     const jump = matchStudyPlanJumpTarget(itemText);
     if (jump) return { kind: jump.tab, tab: jump.tab, topicKey: jump.topicKey };
     if (/종합\s*모의고사\s*\d+/.test(itemText)) return { kind: "mockexam", tab: "mockexam" };
-    const hintKey = DAY_TOPIC_HINT[dayNumber];
-    if (hintKey) return { kind: "concept", tab: "materials", topicKey: hintKey };
+    const headings = GUIDED_ITEM_CHAPTERS[`${dayNumber}-${idx}`];
+    if (headings) return { kind: "concept-chapter", headings };
     return { kind: "manual" };
   }
+
+  // study-guide.md가 이번 세션에서 아직 한 번도 로드된 적 없으면 먼저 캐시를 채운다. loadMaterialsDoc()과
+  // 별개로 직접 fetch하는 이유: 그쪽은 항상 전체 문서를 렌더링해 버려서, 여기서 원하는 "잘라낸 챕터만"을
+  // 보여주기 전에 전체 문서가 잠깐이라도 그려지는 것을 피하기 위함이다.
+  function ensureStudyGuideLoaded(cb) {
+    if (materialsCache["study-guide"]) {
+      cb();
+      return;
+    }
+    fetch(MATERIALS_DOCS["study-guide"])
+      .then((res) => res.text())
+      .then((md) => {
+        if (!materialsCache["study-guide"]) materialsCache["study-guide"] = renderMarkdown(md);
+        cb();
+      });
+  }
+
+  // 캐시된 학습 자료 HTML에서 지정한 헤딩(들)에 해당하는 챕터만 잘라낸다. 여러 헤딩이 주어지면 문서 순서상
+  // 첫 헤딩의 시작부터, 마지막 헤딩 바로 다음 헤딩 직전까지를 통째로 반환한다(그 사이에 다른 챕터가 살짝
+  // 끼어도 허용 — 전체 문서를 여는 것보다는 훨씬 좁혀진 범위라 문제되지 않는다).
+  function extractChapterFragmentHtml(docKey, headings) {
+    const cached = materialsCache[docKey];
+    if (!cached) return null;
+    const positions = headings.map((h) => cached.toc.findIndex((t) => t.text === h)).filter((i) => i >= 0);
+    if (!positions.length) return null;
+    const startPos = Math.min(...positions);
+    const endPos = Math.max(...positions);
+    const startId = cached.toc[startPos].id;
+    const afterId = endPos + 1 < cached.toc.length ? cached.toc[endPos + 1].id : null;
+
+    const container = document.createElement("div");
+    container.innerHTML = cached.html;
+    const startEl = container.querySelector(`[id="${startId}"]`);
+    if (!startEl) return null;
+    const endEl = afterId ? container.querySelector(`[id="${afterId}"]`) : null;
+
+    const frag = document.createElement("div");
+    let node = startEl;
+    while (node && node !== endEl) {
+      const nextNode = node.nextElementSibling;
+      frag.appendChild(node);
+      node = nextNode;
+    }
+    return frag.innerHTML;
+  }
+
+  // 개념 항목 하나에 해당하는 챕터(들)만 #materials-body에 그린다 — 전체 문서를 열어 끝없이 스크롤하게 하는
+  // 대신 "여기부터 여기까지만 보면 된다"는 명확한 경계를 준다. 챕터 읽음 토글 등 기존 위임 리스너는
+  // #materials-body에 이미 걸려 있으므로 그대로 재사용된다.
+  function renderGuidedConceptChapter(headings) {
+    ensureStudyGuideLoaded(() => {
+      const body = document.getElementById("materials-body");
+      if (!body) return;
+      const html = extractChapterFragmentHtml("study-guide", headings);
+      body.innerHTML = html || `<p class="hint">이 항목에 해당하는 학습 자료를 찾지 못했어요.</p>`;
+      applyChapterReadState(body);
+      applyChapterStepState(body);
+    });
+  }
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#guided-view-full-materials")) return;
+    document.body.classList.remove("guided-bounded-materials");
+    loadMaterialsDoc("study-guide");
+  });
 
   // 아직 안 끝낸 첫 항목을 찾는다 — Day/순서상 이게 곧 "다음 스텝"이다. 커스텀 메모는 개수가 유동적이고
   // 자동완료 신호가 없어 고정된 순서의 흐름에 넣지 않는다(자유 모드에서만 관리하는 채로 둔다).
@@ -3901,14 +4016,23 @@
     }
 
     const stepKey = `${next.day}-${next.idx}`;
-    const step = classifyGuidedStep(next.itemText, next.day);
+    const step = classifyGuidedStep(next.itemText, next.day, next.idx);
     if (stepKey !== lastGuidedStepKey) {
       lastGuidedStepKey = stepKey;
       if (step.kind === "manual") {
+        document.body.classList.remove("guided-bounded-materials");
         dispatchSyntheticJump({ gotoTab: "studyplan", scrollToDay: String(next.day) });
+      } else if (step.kind === "concept-chapter") {
+        document.body.classList.add("guided-bounded-materials");
+        currentMaterialsDoc = "study-guide";
+        document.querySelectorAll(".materials-switch-btn").forEach((b) => b.classList.toggle("active", b.dataset.doc === "study-guide"));
+        dispatchSyntheticJump({ gotoTab: "materials" });
+        renderGuidedConceptChapter(step.headings);
       } else if (step.topicKey) {
+        document.body.classList.remove("guided-bounded-materials");
         dispatchSyntheticJump({ gotoTab: step.tab, gotoTopic: step.topicKey });
       } else {
+        document.body.classList.remove("guided-bounded-materials");
         dispatchSyntheticJump({ gotoTab: step.tab });
       }
     }
@@ -3916,6 +4040,10 @@
     // detectAutoCheck가 신호를 준 항목(플래시카드/퀴즈/모의고사/읽음 50%↑ 개념)은 그 활동을 실제로
     // 완료해야만 다음으로 넘어간다(자유 모드의 체크박스 비활성 규칙과 동일). 신호가 아직 없는 항목만
     // "완료" 버튼으로 수동 확인할 수 있다.
+    const showFullDocBtn =
+      step.kind === "concept-chapter"
+        ? `<button class="link-btn" type="button" id="guided-view-full-materials">📖 학습 자료 전체보기</button>`
+        : "";
     const actionHtml = next.auto
       ? `<button class="btn-sm" type="button" disabled title="${escapeHtml(next.auto.reason)}">다음 →</button>`
       : `<button class="btn-sm" type="button" id="guided-complete-btn">완료</button>`;
@@ -3929,6 +4057,7 @@
         <div class="guided-step-text">${escapeHtml(next.itemText)}</div>
         <div class="guided-step-actions">
           ${actionHtml}
+          ${showFullDocBtn}
           <button class="link-btn" type="button" id="guided-exit-btn">자유 모드로 전환</button>
         </div>
       </div>

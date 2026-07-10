@@ -249,6 +249,16 @@ body.guided-mode #guided-entry-bar {
   display: none !important;
 }
 
+/* 가이드 모드에서 개념 항목 하나에 해당하는 챕터만 볼 때 — 학습 자료 탭의 문서 전환/목차/플로팅 버튼처럼
+   "전체 문서 탐색"을 위한 UI는 숨겨서, 딱 이 챕터만 있는 것처럼 경계를 명확히 한다. */
+body.guided-bounded-materials #tab-materials > .controls,
+body.guided-bounded-materials #materials-toc,
+body.guided-bounded-materials #materials-toc-float,
+body.guided-bounded-materials #materials-toc-fab,
+body.guided-bounded-materials #materials-back-to-top {
+  display: none !important;
+}
+
 /* ---------- Header ---------- */
 .app-header {
   position: relative;
