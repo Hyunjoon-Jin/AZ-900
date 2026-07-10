@@ -192,6 +192,63 @@ body::before {
 }
 .studyplan-flow-bar .btn-sm { flex-shrink: 0; }
 
+.guided-entry-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border);
+}
+.guided-chrome {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  padding: 0.7rem 1rem;
+}
+.guided-chrome-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 720px;
+  margin: 0 auto;
+}
+.guided-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.guided-progress .meter { flex: 1; }
+.guided-progress-label {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.guided-step-text {
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.guided-step-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+.guided-chrome-complete {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+body.guided-mode .guided-chrome { display: block; }
+body.guided-mode nav.tabs,
+body.guided-mode #next-step-bar,
+body.guided-mode #studyplan-flow-bar,
+body.guided-mode #guided-entry-bar {
+  display: none !important;
+}
+
 /* ---------- Header ---------- */
 .app-header {
   position: relative;

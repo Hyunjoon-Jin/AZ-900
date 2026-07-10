@@ -78,6 +78,7 @@
       if (activeTab === "studyplan") studyPlanFlowContext = null;
       renderNextStepBar();
       renderStudyPlanFlowBar();
+      renderGuidedMode();
       const fab = document.getElementById("materials-back-to-top");
       if (fab && activeTab !== "materials") fab.hidden = true;
       if (activeTab !== "materials") {
@@ -916,6 +917,7 @@
         existingBanner.remove();
       }
     }
+    renderGuidedMode();
   }
 
   if (materialsBodyEl) {
@@ -1416,6 +1418,7 @@
       fcAdvance();
     }
     renderStudyPlanFlowBar();
+    renderGuidedMode();
   });
   document.getElementById("fc-again").addEventListener("click", () => {
     if (fcDeck.length === 0) return;
@@ -1745,6 +1748,7 @@
       applyChapterStepState(materialsBodyEl);
     }
     renderStudyPlanFlowBar();
+    renderGuidedMode();
     refreshWrongReviewButton();
     const breakdownEl = document.getElementById("quiz-topic-breakdown");
     breakdownEl.innerHTML = "";
@@ -2275,6 +2279,7 @@
       durationSec: Math.round((Date.now() - mockStartedAt) / 1000),
     });
     refreshWrongReviewButton();
+    renderGuidedMode();
   }
 
   document.getElementById("mock-retry").addEventListener("click", () => {
@@ -3516,6 +3521,7 @@
               d[`${todayStat.day.day}-${idx}`] = cb.checked;
               saveProgress(d);
               renderStudyPlan();
+              renderGuidedMode();
             });
           }
           label.appendChild(cb);
@@ -3640,6 +3646,7 @@
             d[itemKey] = cb.checked;
             saveProgress(d);
             renderStudyPlan();
+            renderGuidedMode();
           });
         }
         itemLabel.appendChild(cb);
@@ -3808,7 +3815,171 @@
     syncStickyOffset();
   }
 
+  // ---------- 가이드 모드 (듀오링고 스타일로 "다음"만 눌러 진행하는 선형 학습 흐름) ----------
+  // 새 콘텐츠나 새 완료 판정 로직을 만들지 않고, 기존 탭들과 완료 감지 로직(matchStudyPlanJumpTarget/
+  // detectAutoCheck/computeStudyPlanDayStats)을 그대로 오케스트레이션한다 — 탭 바만 숨기고 어떤 탭을
+  // 보여줄지 프로그램이 대신 클릭해 준다. 그래서 화면 이탈감 없이 "다음"만 눌러도 되는 흐름이 만들어진다.
+  const GUIDED_MODE_KEY = "az900-mode-v1";
+  function loadGuidedMode() {
+    return localStorage.getItem(GUIDED_MODE_KEY) || "guided";
+  }
+  function saveGuidedMode(mode) {
+    localStorage.setItem(GUIDED_MODE_KEY, mode);
+  }
+
+  // 기존 [data-goto-tab]/[data-scroll-to-day] 위임 리스너를 그대로 태우기 위해, 필요한 속성을 가진
+  // 임시 요소를 만들어 클릭시키고 지운다 — 탭 전환 순서(탭 먼저, 스크롤/필터링 나중) 같은 기존 규칙을
+  // 다시 구현할 필요가 없다.
+  function dispatchSyntheticJump(attrs) {
+    const el = document.createElement("button");
+    Object.keys(attrs).forEach((k) => {
+      el.dataset[k] = attrs[k];
+    });
+    document.body.appendChild(el);
+    el.click();
+    el.remove();
+  }
+
+  // 항목 문구로 이 단계가 어떤 종류인지 판정한다 — matchStudyPlanJumpTarget/모의고사 정규식/
+  // DAY_TOPIC_HINT까지, detectAutoCheck와 완전히 같은 우선순위로 이미 존재하는 판정을 그대로 쓴다.
+  function classifyGuidedStep(itemText, dayNumber) {
+    const jump = matchStudyPlanJumpTarget(itemText);
+    if (jump) return { kind: jump.tab, tab: jump.tab, topicKey: jump.topicKey };
+    if (/종합\s*모의고사\s*\d+/.test(itemText)) return { kind: "mockexam", tab: "mockexam" };
+    const hintKey = DAY_TOPIC_HINT[dayNumber];
+    if (hintKey) return { kind: "concept", tab: "materials", topicKey: hintKey };
+    return { kind: "manual" };
+  }
+
+  // 아직 안 끝낸 첫 항목을 찾는다 — Day/순서상 이게 곧 "다음 스텝"이다. 커스텀 메모는 개수가 유동적이고
+  // 자동완료 신호가 없어 고정된 순서의 흐름에 넣지 않는다(자유 모드에서만 관리하는 채로 둔다).
+  function findNextGuidedItem(dayStats) {
+    for (const stat of dayStats) {
+      const builtinCount = stat.day.items.length;
+      for (let idx = 0; idx < builtinCount; idx++) {
+        const item = stat.itemChecks[idx];
+        if (!item.checked) return { day: stat.day.day, idx, itemText: item.itemText, auto: item.auto };
+      }
+    }
+    return null;
+  }
+
+  // 현재 렌더링된 스텝(day-idx)을 기억해 뒀다가, 실제로 스텝이 "바뀔 때"만 탭 전환/필터링을 새로 실행한다.
+  // 그렇지 않으면 fc-know 클릭 한 번마다 매번 덱을 다시 불러오는 등 불필요한 리셋이 생긴다.
+  let lastGuidedStepKey = null;
+  function renderGuidedMode() {
+    const chromeEl = document.getElementById("guided-chrome");
+    if (!chromeEl) return;
+    if (!document.body.classList.contains("guided-mode")) {
+      chromeEl.innerHTML = "";
+      return;
+    }
+
+    const quizHistory = loadQuizHistory();
+    const currentPlanDay = computeCurrentPlanDay(loadStudyPlanStart());
+    const dayStats = computeStudyPlanDayStats(quizHistory, currentPlanDay);
+    const totalItems = dayStats.reduce((sum, s) => sum + s.day.items.length, 0);
+    const doneItems = dayStats.reduce(
+      (sum, s) => sum + s.itemChecks.slice(0, s.day.items.length).filter((c) => c.checked).length,
+      0
+    );
+    const pct = totalItems ? Math.round((doneItems / totalItems) * 100) : 0;
+    const next = findNextGuidedItem(dayStats);
+
+    if (!next) {
+      const alreadyCelebrated = lastGuidedStepKey === "__done__";
+      lastGuidedStepKey = "__done__";
+      chromeEl.innerHTML = `
+        <div class="guided-chrome-inner guided-chrome-complete">
+          <span>🎉 10일 학습 계획을 모두 마쳤어요!</span>
+          <button class="btn-sm" type="button" id="guided-exit-btn">자유 모드로 이동</button>
+        </div>
+      `;
+      syncStickyOffset();
+      if (!alreadyCelebrated) launchConfetti();
+      return;
+    }
+
+    const stepKey = `${next.day}-${next.idx}`;
+    const step = classifyGuidedStep(next.itemText, next.day);
+    if (stepKey !== lastGuidedStepKey) {
+      lastGuidedStepKey = stepKey;
+      if (step.kind === "manual") {
+        dispatchSyntheticJump({ gotoTab: "studyplan", scrollToDay: String(next.day) });
+      } else if (step.topicKey) {
+        dispatchSyntheticJump({ gotoTab: step.tab, gotoTopic: step.topicKey });
+      } else {
+        dispatchSyntheticJump({ gotoTab: step.tab });
+      }
+    }
+
+    // detectAutoCheck가 신호를 준 항목(플래시카드/퀴즈/모의고사/읽음 50%↑ 개념)은 그 활동을 실제로
+    // 완료해야만 다음으로 넘어간다(자유 모드의 체크박스 비활성 규칙과 동일). 신호가 아직 없는 항목만
+    // "완료" 버튼으로 수동 확인할 수 있다.
+    const actionHtml = next.auto
+      ? `<button class="btn-sm" type="button" disabled title="${escapeHtml(next.auto.reason)}">다음 →</button>`
+      : `<button class="btn-sm" type="button" id="guided-complete-btn">완료</button>`;
+
+    chromeEl.innerHTML = `
+      <div class="guided-chrome-inner">
+        <div class="guided-progress">
+          <div class="meter" role="progressbar" aria-label="가이드 모드 진행률"><div class="meter-fill" style="width:${pct}%"></div></div>
+          <span class="guided-progress-label">Day ${next.day} · ${doneItems}/${totalItems}</span>
+        </div>
+        <div class="guided-step-text">${escapeHtml(next.itemText)}</div>
+        <div class="guided-step-actions">
+          ${actionHtml}
+          <button class="link-btn" type="button" id="guided-exit-btn">자유 모드로 전환</button>
+        </div>
+      </div>
+    `;
+    syncStickyOffset();
+  }
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#guided-complete-btn")) return;
+    if (!lastGuidedStepKey || lastGuidedStepKey.startsWith("__done__")) return;
+    const [dayStr, idxStr] = lastGuidedStepKey.split("-");
+    const d = loadProgress();
+    d[`${dayStr}-${idxStr}`] = true;
+    saveProgress(d);
+    // 뒤에 실제로 보이고 있는 학습 계획 탭(수동 스텝의 배경 화면)의 체크박스도 즉시 동기화한다.
+    if (activeTab === "studyplan") renderStudyPlan();
+    renderGuidedMode();
+  });
+
+  function enterGuidedMode() {
+    saveGuidedMode("guided");
+    if (!loadStudyPlanStart()) {
+      const d = new Date();
+      saveStudyPlanStart(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+    }
+    document.body.classList.add("guided-mode");
+    lastGuidedStepKey = null;
+    renderGuidedMode();
+  }
+
+  function exitGuidedMode() {
+    saveGuidedMode("free");
+    document.body.classList.remove("guided-mode");
+    renderGuidedMode();
+    syncStickyOffset();
+  }
+
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#guided-exit-btn")) exitGuidedMode();
+    if (e.target.closest("#guided-entry-btn")) enterGuidedMode();
+  });
+
+  function renderGuidedEntryBar() {
+    const el = document.getElementById("guided-entry-bar");
+    if (!el) return;
+    el.innerHTML = `<button class="btn-sm" type="button" id="guided-entry-btn">🧭 가이드 모드로 시작하기</button>`;
+  }
+  renderGuidedEntryBar();
+
   populateSessionFilters();
   renderProgress();
   renderNextStepBar();
+  if (loadGuidedMode() !== "free") enterGuidedMode();
 })();
